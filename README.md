@@ -47,7 +47,7 @@ java -cp out Streamlet 3
 java -cp out Streamlet 4
 ```
 
-Another easy way to start the system is by running the provided shell script(Linux 24):
+Another easy way to start the system is by running the provided shell script(Linux Ubuntu 24):
 ```bash
 ./run_all.sh
 ```
@@ -59,3 +59,10 @@ If permission is denied, execute:
 chmod +x run_all.sh
 ```
 
+Currently, the project support transactions by simulations of the corresponding node leader, or by a client process.
+Transaction generation mode can be changed in the **config.txt** file in **transactionsMode** section.
+
+To execute the client process run:
+```bash
+java -cp out StreamletClient
+```
