@@ -1,4 +1,4 @@
-package urb;
+package URB;
 
 import utils.application.Message;
 

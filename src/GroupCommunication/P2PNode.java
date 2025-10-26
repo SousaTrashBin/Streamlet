@@ -1,4 +1,4 @@
-package network;
+package GroupCommunication;
 
 import utils.application.Message;
 import utils.communication.KeyType;

@@ -47,7 +47,7 @@ java -cp out Streamlet 3
 java -cp out Streamlet 4
 ```
 
-Another easy way to start the system is by running the provided shell script(Linux 24):
+Another easy way to start the system is by running the provided shell script(Linux Ubuntu 24):
 ```bash
 ./run_all.sh
 ```

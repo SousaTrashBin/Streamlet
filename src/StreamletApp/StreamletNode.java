@@ -1,6 +1,6 @@
-package application;
+package StreamletApp;
 
-import urb.URBNode;
+import URB.URBNode;
 import utils.application.*;
 import utils.communication.Address;
 import utils.communication.PeerInfo;
