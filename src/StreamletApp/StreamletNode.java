@@ -130,8 +130,7 @@ public class StreamletNode {
     }
 
     private void proposeNewBlock(int epoch) throws NoSuchAlgorithmException {
-        LinkedList<Block> parentChain = blockchainManager.getBiggestNotarizedChain();
-        Block parent = parentChain.getLast();
+        Block parent = blockchainManager.getBiggestNotarizedChain().getLast();
         Transaction[] transactions;
         if (isClientGeneratingTransactions) {
             transactions = new Transaction[clientPendingTransactionsQueue.size()];
@@ -145,7 +144,7 @@ public class StreamletNode {
 
         Block newBlock = new Block(parent.getSHA1(), epoch, parent.length() + 1, transactions);
         AppLogger.logDebug("Proposed block: " + newBlock + " with transactions: " + Arrays.toString(transactions));
-        urbNode.broadcastFromLocal(new Message(MessageType.PROPOSE, new BlockWithChain(newBlock, parentChain), localId));
+        urbNode.broadcastFromLocal(new Message(MessageType.PROPOSE, newBlock, localId));
     }
 
     private void handleMessageDelivery(Message message) {
@@ -153,19 +152,19 @@ public class StreamletNode {
         switch (message.type()) {
             case PROPOSE -> handlePropose(message);
             case VOTE -> handleVote(message);
+            default -> {}
         }
     }
 
     private void handlePropose(Message message) {
-        BlockWithChain blockWithChain = (BlockWithChain) message.content();
-        SeenProposal proposal = new SeenProposal(message.sender(), blockWithChain.block().epoch());
+        Block fullBlock = (Block) message.content();
+        SeenProposal proposal = new SeenProposal(message.sender(), fullBlock.epoch());
 
         if (seenProposals.contains(proposal)
-                || !blockchainManager.onPropose(blockWithChain))
+                || !blockchainManager.onPropose(fullBlock))
             return;
         seenProposals.add(proposal);
 
-        Block fullBlock = blockWithChain.block();
         Block blockHeader = new Block(fullBlock.parentHash(), fullBlock.epoch(), fullBlock.length(), new Transaction[0]);
         urbNode.broadcastFromLocal(new Message(MessageType.VOTE, blockHeader, localId));
         AppLogger.logDebug("Voted for block from leader " + message.sender() + " epoch " + fullBlock.epoch());

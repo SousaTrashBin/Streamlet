@@ -1,7 +1,6 @@
 package StreamletApp;
 
 import utils.application.Block;
-import utils.application.BlockWithChain;
 import utils.application.Transaction;
 import utils.logs.AppLogger;
 
@@ -14,9 +13,10 @@ public class BlockchainManager {
     private static final int SHA1_LENGTH = 20;
     private static final Block GENESIS_BLOCK =
             new Block(new byte[SHA1_LENGTH], 0, 0, new Transaction[0]);
+
     private final Set<ChainView> seenNotarizedChains = new HashSet<>();
     private final Set<ChainView> finalizedChains = new HashSet<>();
-    private final HashMap<Block, BlockWithChain> pendingProposes = new HashMap<>();
+    private final Map<Block, ChainView> pendingProposes = new HashMap<>();
     private LinkedList<Block> biggestNotarizedChain = new LinkedList<>();
 
     public BlockchainManager() {
@@ -24,20 +24,48 @@ public class BlockchainManager {
         seenNotarizedChains.add(new ChainView(biggestNotarizedChain));
     }
 
+    public LinkedList<Block> getBiggestNotarizedChain() {
+        return biggestNotarizedChain;
+    }
+
+    public boolean onPropose(Block proposedBlock) {
+        Optional<ChainView> chainOpt = seenNotarizedChains.stream()
+                .filter(notarizedChain -> 
+                    Arrays.equals(proposedBlock.parentHash(), notarizedChain.blocks().getLast().getSHA1()))
+                .findFirst();
+        if (chainOpt.isEmpty()) return false;
+
+        LinkedList<Block> proposedChain = new LinkedList<>(chainOpt.get().blocks());
+        proposedChain.add(proposedBlock);
+        ChainView parentChain = new ChainView(proposedChain);
+
+        boolean isStrictlyLonger = seenNotarizedChains.stream()
+                .anyMatch(notarizedChain -> proposedBlock.length() > notarizedChain.blocks().getLast().length());
+        if (!isStrictlyLonger) {
+            return false;
+        }
+        pendingProposes.put(proposedBlock, parentChain);
+        return true;
+    }
+
     public void notarizeBlock(Block headerBlock) {
-        BlockWithChain proposal = pendingProposes.get(headerBlock);
-        if (proposal == null) {
+        ChainView chain = pendingProposes.get(headerBlock);
+        if (chain == null) {
             return;
         }
-        LinkedList<Block> chain = proposal.chain();
-        chain.add(proposal.block());
+
+        Block addedBlock = chain.blocks().removeLast();
+        seenNotarizedChains.remove(chain);
+        chain.blocks().add(addedBlock);
+        seenNotarizedChains.add(chain);
+
         pendingProposes.remove(headerBlock);
-        seenNotarizedChains.add(new ChainView(chain));
-        if (chain.getLast().length() > biggestNotarizedChain.getLast().length()) {
-            biggestNotarizedChain = chain;
+
+        if (chain.blocks().getLast().length() > biggestNotarizedChain.getLast().length()) {
+            biggestNotarizedChain = chain.blocks();
         }
         AppLogger.logInfo("Block notarized: epoch " + headerBlock.epoch() + " length " + headerBlock.length());
-        tryToFinalizeChain(chain);
+        tryToFinalizeChain(chain.blocks());
     }
 
     private void tryToFinalizeChain(LinkedList<Block> chain) {
@@ -53,22 +81,6 @@ public class BlockchainManager {
         if (shouldChainBeFinalized) {
             finalizedChains.add(new ChainView(new LinkedList<>(biggestNotarizedChain.subList(0, size - 1))));
         }
-    }
-
-    public boolean onPropose(BlockWithChain proposal) {
-        Block proposedBlock = proposal.block();
-        LinkedList<Block> chain = proposal.chain();
-        Block parentTip = chain.getLast();
-
-        if (!Arrays.equals(proposedBlock.parentHash(), parentTip.getSHA1())) return false;
-
-        boolean isStrictlyLonger = seenNotarizedChains.stream()
-                .anyMatch(notarizedChain -> proposedBlock.length() > notarizedChain.blocks().getLast().length());
-        if (!isStrictlyLonger) {
-            return false;
-        }
-        pendingProposes.put(proposedBlock, proposal);
-        return true;
     }
 
     public void printBiggestFinalizedChain() {
@@ -103,9 +115,5 @@ public class BlockchainManager {
             }
         }
 
-    }
-
-    public LinkedList<Block> getBiggestNotarizedChain() {
-        return biggestNotarizedChain;
     }
 }
