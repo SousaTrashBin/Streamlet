@@ -14,14 +14,15 @@ void main(String[] args) throws IOException, InterruptedException {
 
     ConfigParser.ConfigData configData = ConfigParser.parseConfig();
 
+    LocalDateTime start = configData.start;
+
     List<PeerInfo> peerInfos = configData.peers;
     AppLogger.updateLoggerLevel(configData.logLevel);
     PeerInfo localPeer = peerInfos.get(nodeId);
 
     List<PeerInfo> remotePeers = peerInfos.stream().filter(p -> p.id() != nodeId).toList();
     AppLogger.logDebug(remotePeers.toString());
-
-    AppLogger.logInfo("Waiting all peers to connect...");
-    StreamletNode node = new StreamletNode(localPeer, remotePeers, 1, configData.isClientGeneratingTransactions, configData.servers.get(nodeId));
+    
+    StreamletNode node = new StreamletNode(localPeer, remotePeers, 1, start, configData.isClientGeneratingTransactions, configData.servers.get(nodeId));
     node.startProtocol();
 }

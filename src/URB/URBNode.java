@@ -33,12 +33,7 @@ public class URBNode {
         this.callback = callback;
     }
 
-    public void waitForAllPeersToConnect() throws InterruptedException {
-        networkLayer.waitForAllPeersConnected();
-    }
-
     public void startURBNode() throws InterruptedException {
-        waitForAllPeersToConnect();
         AppLogger.logInfo("P2PNode " + localPeerId + " is ready");
         executor.submit(this::processIncomingMessages);
     }

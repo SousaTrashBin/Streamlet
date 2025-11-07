@@ -11,6 +11,9 @@ import java.io.ObjectInputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoField;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,6 +26,7 @@ public class StreamletNode {
     private static final int CONFUSION_START = 0;
     private static final int CONFUSION_DURATION = 2;
     private final int deltaInSeconds;
+    private final LocalDateTime start;
     private final int numberOfDistinctNodes;
     private final TransactionPoolSimulator transactionPoolSimulator;
     private final Random random = new Random(1L);
@@ -43,11 +47,12 @@ public class StreamletNode {
     private final Address myClientAddress;
 
     public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds,
-                         boolean isClientGeneratingTransactions, Address myClientAddress)
+                         LocalDateTime start, boolean isClientGeneratingTransactions, Address myClientAddress)
             throws IOException {
         localId = localPeerInfo.id();
         numberOfDistinctNodes = 1 + remotePeersInfo.size();
         this.deltaInSeconds = deltaInSeconds;
+        this.start = start;
         transactionPoolSimulator = new TransactionPoolSimulator(numberOfDistinctNodes);
         blockchainManager = new BlockchainManager();
         urbNode = new URBNode(localPeerInfo, remotePeersInfo, derivableQueue::add);
@@ -57,10 +62,59 @@ public class StreamletNode {
 
     public void startProtocol() throws InterruptedException {
         launchThreads();
-        urbNode.waitForAllPeersToConnect();
 
         long epochDuration = 2L * deltaInSeconds;
-        scheduler.scheduleAtFixedRate(this::safeAdvanceEpoch, 0, epochDuration, TimeUnit.SECONDS);
+        long nanoSecondsToWait = waitStartOrRecover();
+        scheduler.scheduleAtFixedRate(
+            this::safeAdvanceEpoch, nanoSecondsToWait, (long) (epochDuration*1e9), TimeUnit.NANOSECONDS
+        );
+    }
+
+    private void launchThreads() {
+        executor.submit(() -> {
+            try {
+                urbNode.startURBNode();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+
+        executor.submit(this::consumeMessages);
+        if (isClientGeneratingTransactions) executor.submit(this::receiveClientTransactionsRequests);
+    }
+
+    private long waitStartOrRecover() {
+        LocalDateTime now = LocalDateTime.now();
+        if (now.isBefore(start)) return waitStart();
+        if (now.isAfter(start)) return recover();
+        return 0;
+    }
+
+    private long waitStart() {
+        AppLogger.logInfo("Waiting for protocol to start...");
+        long nanoSecondsToWait = ChronoUnit.NANOS.between(LocalDateTime.now(), start);
+        return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
+    }
+
+    private long recover() {
+        AppLogger.logInfo("(Re)joining in late...");
+        
+        /*TODO - Ask for missing chain and random to determine leader (somehow...)
+        (that might be better inside the epoch instead of here so we avoid possibly losing on a proposed block
+        that may arrive after we get the chain back, but before we start the epoch scheduling)*/
+
+        int epochDuration = 2 * this.deltaInSeconds;
+        long protocolAgeInSeconds = ChronoUnit.SECONDS.between(start, LocalDateTime.now());
+        // Ignore the seconds spent on the current epoch
+        protocolAgeInSeconds -= protocolAgeInSeconds % epochDuration;
+        int ongoingEpoch = (int) (protocolAgeInSeconds / epochDuration);
+        currentEpoch.compareAndSet(0, ongoingEpoch + 1);
+
+        LocalDateTime nextEpochDate = start.plusSeconds(protocolAgeInSeconds + epochDuration);
+        long nanoSecondsToWait = ChronoUnit.NANOS.between(
+            LocalDateTime.now(), nextEpochDate
+        );
+        return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
     }
 
     private void safeAdvanceEpoch() {
@@ -74,7 +128,7 @@ public class StreamletNode {
     private void advanceEpoch() {
         int epoch = currentEpoch.get();
         int currentLeaderId = calculateLeaderId(epoch);
-        AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER= " + currentLeaderId + " ####");
+        AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + currentLeaderId + " ####");
 
         if (localId == currentLeaderId) {
             try {
@@ -90,19 +144,6 @@ public class StreamletNode {
         if (epoch != 0 && epoch % BLOCK_CHAIN_PRINT_EPOCH_FREQUENCY == 0)
             blockchainManager.printBiggestFinalizedChain();
         currentEpoch.incrementAndGet();
-    }
-
-    private void launchThreads() {
-        executor.submit(() -> {
-            try {
-                urbNode.startURBNode();
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        });
-
-        executor.submit(this::consumeMessages);
-        if (isClientGeneratingTransactions) executor.submit(this::receiveClientTransactionsRequests);
     }
 
     private void consumeMessages() {
