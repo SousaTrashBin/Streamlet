@@ -5,7 +5,7 @@ P2P=127.0.0.1:54582
 P2P=127.0.0.1:54583
 P2P=127.0.0.1:54584
 
-# Agreed time for every server to start protocol dd:MM:yyyy hh:mm:ss
+# Agreed time for every server to start protocol dd-MM-yyyy HH:mm:ss
 start=07-11-2025 07:29:00
 
 # NORMAL and DEBUG mode for logs
