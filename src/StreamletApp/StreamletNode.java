@@ -12,7 +12,6 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.time.temporal.ChronoField;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
@@ -29,8 +28,8 @@ public class StreamletNode {
     private final LocalDateTime start;
     private final int numberOfDistinctNodes;
     private final TransactionPoolSimulator transactionPoolSimulator;
-    private final Random random = new Random(1L);
     private final AtomicInteger currentEpoch = new AtomicInteger(0);
+    private final AtomicInteger currentLeaderId = new AtomicInteger(0);
 
     private final int localId;
     private final URBNode urbNode;
@@ -43,8 +42,12 @@ public class StreamletNode {
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final CountDownLatch waitForCatchUp = new CountDownLatch(1);
     private final boolean isClientGeneratingTransactions;
     private final Address myClientAddress;
+
+    private Random random = new Random(1L); // To determine epoch leader
+    private volatile boolean needsToRecover = false;
 
     public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds,
                          LocalDateTime start, boolean isClientGeneratingTransactions, Address myClientAddress)
@@ -98,10 +101,7 @@ public class StreamletNode {
 
     private long recover() {
         AppLogger.logInfo("(Re)joining in late...");
-        
-        /*TODO - Ask for missing chain and random to determine leader (somehow...)
-        (that might be better inside the epoch instead of here so we avoid possibly losing on a proposed block
-        that may arrive after we get the chain back, but before we start the epoch scheduling)*/
+        needsToRecover = true;
 
         int epochDuration = 2 * this.deltaInSeconds;
         long protocolAgeInSeconds = ChronoUnit.SECONDS.between(start, LocalDateTime.now());
@@ -117,6 +117,18 @@ public class StreamletNode {
         return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
     }
 
+    private void catchUp(int fromEpoch, int toEpoch) {
+        MissingEpochs missingEpochs = new MissingEpochs(fromEpoch, toEpoch);
+        Message join = new Message(MessageType.JOIN, missingEpochs, localId);
+        urbNode.broadcastFromLocal(join);
+
+        try {
+            waitForCatchUp.await();
+        } catch (InterruptedException e) {
+            AppLogger.logError("Failed to wait for missing blocks - Interrupted", e);
+        }
+    }
+
     private void safeAdvanceEpoch() {
         try {
             advanceEpoch();
@@ -127,10 +139,12 @@ public class StreamletNode {
 
     private void advanceEpoch() {
         int epoch = currentEpoch.get();
-        int currentLeaderId = calculateLeaderId(epoch);
+        // After catching up, this node receives the already advanced Random (if not in confusion epoch)
+        if (needsToRecover) catchUp(blockchainManager.getLastEpoch() + 1, epoch);
+        else calculateLeaderId(epoch);
         AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + currentLeaderId + " ####");
 
-        if (localId == currentLeaderId) {
+        if (localId == currentLeaderId.get()) {
             try {
                 if (!isClientGeneratingTransactions || !clientPendingTransactionsQueue.isEmpty()) {
                     AppLogger.logDebug("Node " + localId + " is leader: proposing new block");
@@ -158,9 +172,20 @@ public class StreamletNode {
                     continue;
                 }
 
-                while (!bufferedMessages.isEmpty()) {
-                    handleMessageDelivery(bufferedMessages.poll());
+                // Store new proposals until this node is done recovering
+                if (needsToRecover && message.type().equals(MessageType.PROPOSE)) {
+                    bufferedMessages.add(message);
+                    continue;
                 }
+
+                // This node cannot help if it is also recovering
+                if (needsToRecover && message.type().equals(MessageType.JOIN)) {
+                    continue;
+                }
+
+                if (!needsToRecover)
+                    while (!bufferedMessages.isEmpty())
+                        handleMessageDelivery(bufferedMessages.poll());
 
                 handleMessageDelivery(message);
             }
@@ -193,6 +218,8 @@ public class StreamletNode {
         switch (message.type()) {
             case PROPOSE -> handlePropose(message);
             case VOTE -> handleVote(message);
+            case JOIN -> handleJoin(message);
+            case UPDATE -> handleUpdate(message);
             default -> {}
         }
     }
@@ -221,14 +248,41 @@ public class StreamletNode {
         }
     }
 
+    private void handleJoin(Message message) {
+        if (message.sender() == localId) return;
+
+        MissingEpochs missingEpochs = (MissingEpochs) message.content();
+        LinkedList<Block> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
+
+        Message catchUp = new Message(
+            MessageType.UPDATE,
+            new CatchUp(message.sender(), missingBlocks, random, currentLeaderId.get(), currentEpoch.get()),
+            localId
+        );
+        urbNode.broadcastFromLocal(catchUp);
+    }
+
+    private void handleUpdate(Message message) {
+        if (!needsToRecover) return;
+        CatchUp catchUp = (CatchUp) message.content();
+        if (catchUp.slackerId() != localId) return;
+
+        this.random = catchUp.leaderRand();
+        this.currentLeaderId.set(catchUp.leaderId());
+        blockchainManager.insertMissingBlocks(catchUp.missingChain());
+
+        needsToRecover = false;
+        AppLogger.logInfo("Finished recovering");
+        waitForCatchUp.countDown();
+    }
+
     private boolean inConfusionEpoch(int epoch) {
         return epoch >= CONFUSION_START && epoch <= CONFUSION_START + CONFUSION_DURATION - 1;
     }
 
-
-    private int calculateLeaderId(int epoch) {
-        return inConfusionEpoch(epoch) ? epoch % numberOfDistinctNodes
-                : random.nextInt(numberOfDistinctNodes);
+    private void calculateLeaderId(int epoch) {
+        if (inConfusionEpoch(epoch)) currentLeaderId.set(epoch % numberOfDistinctNodes);
+        else currentLeaderId.set(random.nextInt(numberOfDistinctNodes));
     }
 
     private void receiveClientTransactionsRequests() {

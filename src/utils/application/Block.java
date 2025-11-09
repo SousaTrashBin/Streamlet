@@ -7,7 +7,7 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-public record Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) implements Content {
+public record Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) implements Content, Comparable<Block> {
 
     public Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) {
         this.parentHash = parentHash;
@@ -55,6 +55,11 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         result = 31 * result + epoch.hashCode();
         result = 31 * result + length.hashCode();
         return result;
+    }
+
+    @Override
+    public int compareTo(Block o) {
+        return epoch - o.epoch;
     }
 
     public String toStringSummary() {

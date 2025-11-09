@@ -67,7 +67,7 @@ public class URBNode {
                     broadcastFromLocal(contentMessage);
                 }
             }
-            case PROPOSE, VOTE -> {
+            case PROPOSE, VOTE, JOIN, UPDATE -> {
                 Message echoMessage = new Message(MessageType.ECHO, message, localPeerId);
                 broadcastToPeers(echoMessage);
                 deliverToApplication(message);

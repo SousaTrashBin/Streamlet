@@ -83,6 +83,68 @@ public class BlockchainManager {
         }
     }
 
+    public int getLastEpoch() {
+        // When we persist the blockchain in the disk,
+        // the file should contain the current epoch in the 1st line to increase performance
+        int lastEpoch = -1;
+        for (ChainView chain : seenNotarizedChains) {
+            Block lastChainBlock = chain.blocks().getLast();
+            int highestEpochInChain = lastChainBlock.epoch();
+            if (!lastChainBlock.equals(GENESIS_BLOCK) && highestEpochInChain > lastEpoch)
+                lastEpoch = highestEpochInChain;
+        }
+        return lastEpoch;
+    }
+
+    public LinkedList<Block> blocksFromToEpoch(int from, int to) {
+        LinkedList<Block> missingBlocks = new LinkedList<>();
+        seenNotarizedChains.stream()
+                .forEach(chain -> chain.blocks().stream()
+                        .forEach(block -> {
+                            if (from <= block.epoch() && block.epoch() < to) missingBlocks.add(block);
+                        }));
+
+        LinkedList<Block> missingBlocksSorted = new LinkedList<>(
+            missingBlocks.stream()
+                .distinct()
+                .sorted()
+                .toList()
+        );
+        return missingBlocksSorted;
+    }
+
+    public void insertMissingBlocks(LinkedList<Block> missingBlocks) {
+        for (Block b : missingBlocks) {
+            byte[] parentHash = b.parentHash();
+            LinkedList<Block> chainOfTheBlock = null;
+            boolean newChain = false;
+
+            for (ChainView chain : seenNotarizedChains) {
+                LinkedList<Block> chainBlocks = chain.blocks();
+                for (int i = 0; i < chainBlocks.size(); i++) {
+                    Block bChain = chainBlocks.get(i);
+                    if (!Arrays.equals(parentHash, bChain.getSHA1())) continue;
+
+                    if (bChain.equals(chainBlocks.getLast())) {
+                        chainOfTheBlock = chainBlocks;
+                        newChain = false;
+                    } else {
+                        chainOfTheBlock = new LinkedList<>(chainBlocks.subList(0, chainBlocks.indexOf(bChain) + 1));
+                        newChain = true;
+                    }
+                    break;
+                }
+                if (chainOfTheBlock != null) break;
+            }
+
+            if (chainOfTheBlock == null) continue;
+            chainOfTheBlock.add(b);
+            if (newChain) {
+                seenNotarizedChains.add(new ChainView(chainOfTheBlock));
+            }
+        }
+    }
+
     public void printBiggestFinalizedChain() {
         final String GREEN = "\u001B[32m";
         final String RESET = "\u001B[0m";
