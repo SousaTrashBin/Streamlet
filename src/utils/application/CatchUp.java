@@ -1,11 +1,13 @@
 package utils.application;
 
+import StreamletApp.BlockNode;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Random;
 
 public record CatchUp(
     Integer slackerId,
-    LinkedList<Block> missingChain,
+    List<BlockNode> missingChain,
     Random leaderRand,
     Integer leaderId,
     Integer currentEpoch
@@ -13,7 +15,7 @@ public record CatchUp(
 
     public CatchUp(
         Integer slackerId,
-        LinkedList<Block> missingChain,
+        List<BlockNode> missingChain,
         Random leaderRand,
         Integer leaderId,
         Integer currentEpoch

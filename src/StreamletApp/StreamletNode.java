@@ -178,11 +178,6 @@ public class StreamletNode {
                     continue;
                 }
 
-                // This node cannot help if it is also recovering
-                if (needsToRecover && message.type().equals(MessageType.JOIN)) {
-                    continue;
-                }
-
                 if (!needsToRecover)
                     while (!bufferedMessages.isEmpty())
                         handleMessageDelivery(bufferedMessages.poll());
@@ -249,10 +244,10 @@ public class StreamletNode {
     }
 
     private void handleJoin(Message message) {
-        if (message.sender() == localId) return;
+        if (message.sender() == localId || needsToRecover) return;
 
         MissingEpochs missingEpochs = (MissingEpochs) message.content();
-        LinkedList<Block> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
+        List<BlockNode> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
 
         Message catchUp = new Message(
             MessageType.UPDATE,
