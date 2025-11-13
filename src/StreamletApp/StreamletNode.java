@@ -29,7 +29,7 @@ public class StreamletNode {
     private final int numberOfDistinctNodes;
     private final TransactionPoolSimulator transactionPoolSimulator;
     private final AtomicInteger currentEpoch = new AtomicInteger(0);
-    private final AtomicInteger currentLeaderId = new AtomicInteger(0);
+    private final Random random = new Random(1L); // To determine epoch leader
 
     private final int localId;
     private final URBNode urbNode;
@@ -42,11 +42,9 @@ public class StreamletNode {
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private final CountDownLatch waitForCatchUp = new CountDownLatch(1);
     private final boolean isClientGeneratingTransactions;
     private final Address myClientAddress;
 
-    private Random random = new Random(1L); // To determine epoch leader
     private volatile boolean needsToRecover = false;
 
     public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds,
@@ -122,11 +120,8 @@ public class StreamletNode {
         Message join = new Message(MessageType.JOIN, missingEpochs, localId);
         urbNode.broadcastFromLocal(join);
 
-        try {
-            waitForCatchUp.await();
-        } catch (InterruptedException e) {
-            AppLogger.logError("Failed to wait for missing blocks - Interrupted", e);
-        }
+        // Update leader randomizer to reflect the same current state as the other nodes
+        for (int epoch = 0; epoch < toEpoch; epoch++) calculateLeaderId(epoch);
     }
 
     private void safeAdvanceEpoch() {
@@ -139,12 +134,14 @@ public class StreamletNode {
 
     private void advanceEpoch() {
         int epoch = currentEpoch.get();
-        // After catching up, this node receives the already advanced Random (if not in confusion epoch)
-        if (needsToRecover) catchUp(blockchainManager.getLastEpoch() + 1, epoch);
-        else calculateLeaderId(epoch);
+        if (needsToRecover) {
+            catchUp(blockchainManager.getLastEpoch() + 1, epoch);
+            needsToRecover = false;
+        }
+        int currentLeaderId = calculateLeaderId(epoch);
         AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + currentLeaderId + " ####");
 
-        if (localId == currentLeaderId.get()) {
+        if (localId == currentLeaderId) {
             try {
                 if (!isClientGeneratingTransactions || !clientPendingTransactionsQueue.isEmpty()) {
                     AppLogger.logDebug("Node " + localId + " is leader: proposing new block");
@@ -172,15 +169,8 @@ public class StreamletNode {
                     continue;
                 }
 
-                // Store new proposals until this node is done recovering
-                if (needsToRecover && message.type().equals(MessageType.PROPOSE)) {
-                    bufferedMessages.add(message);
-                    continue;
-                }
-
-                if (!needsToRecover)
-                    while (!bufferedMessages.isEmpty())
-                        handleMessageDelivery(bufferedMessages.poll());
+                while (!bufferedMessages.isEmpty())
+                    handleMessageDelivery(bufferedMessages.poll());
 
                 handleMessageDelivery(message);
             }
@@ -244,40 +234,32 @@ public class StreamletNode {
     }
 
     private void handleJoin(Message message) {
-        if (message.sender() == localId || needsToRecover) return;
+        if (message.sender() == localId) return;
 
         MissingEpochs missingEpochs = (MissingEpochs) message.content();
         List<BlockNode> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
 
         Message catchUp = new Message(
             MessageType.UPDATE,
-            new CatchUp(message.sender(), missingBlocks, random, currentLeaderId.get(), currentEpoch.get()),
+            new CatchUp(message.sender(), missingBlocks, currentEpoch.get()),
             localId
         );
         urbNode.broadcastFromLocal(catchUp);
     }
 
     private void handleUpdate(Message message) {
-        if (!needsToRecover) return;
         CatchUp catchUp = (CatchUp) message.content();
         if (catchUp.slackerId() != localId) return;
-
-        this.random = catchUp.leaderRand();
-        this.currentLeaderId.set(catchUp.leaderId());
         blockchainManager.insertMissingBlocks(catchUp.missingChain());
-
-        needsToRecover = false;
-        AppLogger.logInfo("Finished recovering");
-        waitForCatchUp.countDown();
     }
 
     private boolean inConfusionEpoch(int epoch) {
         return epoch >= CONFUSION_START && epoch <= CONFUSION_START + CONFUSION_DURATION - 1;
     }
 
-    private void calculateLeaderId(int epoch) {
-        if (inConfusionEpoch(epoch)) currentLeaderId.set(epoch % numberOfDistinctNodes);
-        else currentLeaderId.set(random.nextInt(numberOfDistinctNodes));
+    private int calculateLeaderId(int epoch) {
+        return inConfusionEpoch(epoch) ? epoch % numberOfDistinctNodes
+                : random.nextInt(numberOfDistinctNodes);
     }
 
     private void receiveClientTransactionsRequests() {
