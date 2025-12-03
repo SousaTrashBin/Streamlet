@@ -1,3 +1,4 @@
+
 package utils;
 
 import utils.communication.Address;
@@ -19,9 +20,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class ConfigParser {
-    public final static String CONFIG_FILE = "config.txt";
-    public final static DateTimeFormatter START_FORMAT = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
-    public final static LocalDateTime DEFAULT_START_DATE =
+    public static final String CONFIG_FILE = "config.txt";
+    public static final DateTimeFormatter START_FORMAT = DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm:ss");
+    public static final LocalDateTime DEFAULT_START_DATE =
             LocalDateTime.parse("01-01-2000 00:00:00", START_FORMAT);
 
     private static final Pattern P2P_PATTERN = Pattern.compile("^P2P\\s*=\\s*(.+)$", Pattern.CASE_INSENSITIVE);
@@ -31,14 +32,19 @@ public class ConfigParser {
     private static final Pattern TRANSACTION_MODE_PATTERN = Pattern.compile("^transactionsMode\\s*=\\s*(.+)$", Pattern.CASE_INSENSITIVE);
 
     public static ConfigData parseConfig() throws IOException {
-        ConfigData configData = new ConfigData();
+        List<PeerInfo> peers = new ArrayList<>();
+        LocalDateTime start = DEFAULT_START_DATE;
+        Map<Integer, Address> servers = new HashMap<>();
+        LogLevel logLevel = LogLevel.NORMAL;
+        boolean isClientGeneratingTransactions = false;
+
         List<String> lines = Files.readAllLines(Paths.get(CONFIG_FILE));
         int peerIndex = 0;
         int serverIndex = 0;
 
         for (String line : lines) {
             line = line.trim();
-            if (line.isEmpty() || line.startsWith("#")) continue; // skip empty lines or comments
+            if (line.isEmpty() || line.startsWith("#")) continue;
 
             Matcher p2pMatcher = P2P_PATTERN.matcher(line);
             Matcher startMatcher = START_PATTERN.matcher(line);
@@ -47,23 +53,19 @@ public class ConfigParser {
             Matcher transactionMatcher = TRANSACTION_MODE_PATTERN.matcher(line);
 
             if (p2pMatcher.matches()) {
-                configData.peers.add(new PeerInfo(peerIndex++, Address.fromString(p2pMatcher.group(1).trim())));
+                peers.add(new PeerInfo(peerIndex++, Address.fromString(p2pMatcher.group(1).trim())));
             } else if (startMatcher.matches()) {
-                configData.start = parseToDate(startMatcher.group(1).trim());
+                start = parseToDate(startMatcher.group(1).trim());
             } else if (serverMatcher.matches()) {
-                configData.servers.put(serverIndex++, Address.fromString(serverMatcher.group(1).trim()));
+                servers.put(serverIndex++, Address.fromString(serverMatcher.group(1).trim()));
             } else if (logLevelMatcher.matches()) {
-                try {
-                    configData.logLevel = LogLevel.valueOf(logLevelMatcher.group(1).trim().toUpperCase());
-                } catch (IllegalArgumentException ignored) {
-                    configData.logLevel = LogLevel.NORMAL;
-                }
+                logLevel = parseLogLevel(logLevelMatcher.group(1).trim());
             } else if (transactionMatcher.matches()) {
-                configData.isClientGeneratingTransactions = transactionMatcher.group(1).trim().equalsIgnoreCase("CLIENT");
+                isClientGeneratingTransactions = transactionMatcher.group(1).trim().equalsIgnoreCase("CLIENT");
             }
         }
 
-        return configData;
+        return new ConfigData(peers, start, servers, logLevel, isClientGeneratingTransactions);
     }
 
     private static LocalDateTime parseToDate(String dateStr) {
@@ -77,11 +79,20 @@ public class ConfigParser {
         }
     }
 
-    public static class ConfigData {
-        public List<PeerInfo> peers = new ArrayList<>();
-        public LocalDateTime start = DEFAULT_START_DATE;
-        public Map<Integer, Address> servers = new HashMap<>();
-        public LogLevel logLevel = LogLevel.NORMAL;
-        public boolean isClientGeneratingTransactions = false;
+    private static LogLevel parseLogLevel(String levelStr) {
+        try {
+            return LogLevel.valueOf(levelStr.toUpperCase());
+        } catch (IllegalArgumentException ignored) {
+            return LogLevel.NORMAL;
+        }
+    }
+
+    public record ConfigData(
+            List<PeerInfo> peers,
+            LocalDateTime start,
+            Map<Integer, Address> servers,
+            LogLevel logLevel,
+            boolean isClientGeneratingTransactions
+    ) {
     }
 }
