@@ -1,3 +1,4 @@
+
 package app;
 
 import urb.URBNode;
@@ -21,57 +22,56 @@ record SeenProposal(int leader, int epoch) {
 }
 
 public class StreamletNode {
-    public static final int BLOCK_CHAIN_PRINT_EPOCH_FREQUENCY = 5;
-    private static final int CONFUSION_START = 0;
-    private static final int CONFUSION_DURATION = 2;
+    public static final int BLOCKCHAIN_PRINT_EPOCH_INTERVAL = 5;
+    private static final int CONFUSION_EPOCH_START = 0;
+    private static final int CONFUSION_EPOCH_DURATION = 2;
     private final int deltaInSeconds;
-    private final LocalDateTime start;
-    private final int numberOfDistinctNodes;
+    private final LocalDateTime protocolStartTime;
+    private final int numberOfNodes;
     private final TransactionPoolSimulator transactionPoolSimulator;
     private final AtomicInteger currentEpoch = new AtomicInteger(0);
-    private final Random random = new Random(1L); // To determine epoch leader
+    private final Random epochLeaderRandomizer = new Random(1L);
 
-    private final int localId;
+    private final int localNodeId;
     private final URBNode urbNode;
     private final BlockchainManager blockchainManager;
-    private final Map<Block, Set<Integer>> votedBlocks = new HashMap<>();
-    private final BlockingQueue<Message> derivableQueue = new LinkedBlockingQueue<>(1000);
+    private final Map<Block, Set<Integer>> blockVotes = new HashMap<>();
+    private final BlockingQueue<Message> deliveredMessagesQueue = new LinkedBlockingQueue<>(1000);
     private final Set<SeenProposal> seenProposals = new HashSet<>();
-    private final ConcurrentLinkedQueue<Transaction> clientPendingTransactionsQueue = new ConcurrentLinkedQueue<>();
-
+    private final ConcurrentLinkedQueue<Transaction> pendingClientTransactions = new ConcurrentLinkedQueue<>();
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ScheduledExecutorService epochScheduler = Executors.newSingleThreadScheduledExecutor();
     private final boolean isClientGeneratingTransactions;
-    private final Address myClientAddress;
+    private final Address clientServerAddress;
 
     private volatile boolean needsToRecover = false;
 
     public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds,
-                         LocalDateTime start, boolean isClientGeneratingTransactions, Address myClientAddress)
+                         LocalDateTime protocolStartTime, boolean isClientGeneratingTransactions, Address clientServerAddress)
             throws IOException {
-        localId = localPeerInfo.id();
-        numberOfDistinctNodes = 1 + remotePeersInfo.size();
+        localNodeId = localPeerInfo.id();
+        numberOfNodes = 1 + remotePeersInfo.size();
         this.deltaInSeconds = deltaInSeconds;
-        this.start = start;
-        transactionPoolSimulator = new TransactionPoolSimulator(numberOfDistinctNodes);
+        this.protocolStartTime = protocolStartTime;
+        transactionPoolSimulator = new TransactionPoolSimulator(numberOfNodes);
         blockchainManager = new BlockchainManager();
-        urbNode = new URBNode(localPeerInfo, remotePeersInfo, derivableQueue::add);
+        urbNode = new URBNode(localPeerInfo, remotePeersInfo, deliveredMessagesQueue::add);
         this.isClientGeneratingTransactions = isClientGeneratingTransactions;
-        this.myClientAddress = myClientAddress;
+        this.clientServerAddress = clientServerAddress;
     }
 
-    public void startProtocol() throws InterruptedException {
-        launchThreads();
+    public void startProtocol() {
+        launchBackgroundThreads();
 
-        long epochDuration = 2L * deltaInSeconds;
-        long nanoSecondsToWait = waitStartOrRecover();
-        scheduler.scheduleAtFixedRate(
-                this::safeAdvanceEpoch, nanoSecondsToWait, (long) (epochDuration * 1e9), TimeUnit.NANOSECONDS
+        long epochDurationNanos = 2L * deltaInSeconds * 1_000_000_000L;
+        long delayUntilFirstEpochNanos = calculateDelayUntilFirstEpoch();
+        epochScheduler.scheduleAtFixedRate(
+                this::safeAdvanceEpoch, delayUntilFirstEpochNanos, epochDurationNanos, TimeUnit.NANOSECONDS
         );
     }
 
-    private void launchThreads() {
+    private void launchBackgroundThreads() {
         executor.submit(() -> {
             try {
                 urbNode.startURBNode();
@@ -80,48 +80,57 @@ public class StreamletNode {
             }
         });
 
-        executor.submit(this::consumeMessages);
-        if (isClientGeneratingTransactions) executor.submit(this::receiveClientTransactionsRequests);
+        executor.submit(this::processDeliveredMessages);
+        if (isClientGeneratingTransactions) {
+            executor.submit(this::acceptClientTransactions);
+        }
     }
 
-    private long waitStartOrRecover() {
+    private long calculateDelayUntilFirstEpoch() {
         LocalDateTime now = LocalDateTime.now();
-        if (now.isBefore(start)) return waitStart();
-        if (now.isAfter(start)) return recover();
+        if (now.isBefore(protocolStartTime)) {
+            return calculateDelayUntilProtocolStart();
+        }
+        if (now.isAfter(protocolStartTime)) {
+            return recoverAndGetDelayToNextEpoch();
+        }
         return 0;
     }
 
-    private long waitStart() {
+    private long calculateDelayUntilProtocolStart() {
         AppLogger.logInfo("Waiting for protocol to start...");
-        long nanoSecondsToWait = ChronoUnit.NANOS.between(LocalDateTime.now(), start);
-        return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
+        long delayNanos = ChronoUnit.NANOS.between(LocalDateTime.now(), protocolStartTime);
+        return Math.max(delayNanos, 0);
     }
 
-    private long recover() {
-        AppLogger.logInfo("(Re)joining in late...");
+    private long recoverAndGetDelayToNextEpoch() {
+        AppLogger.logInfo("(Re)joining protocol that has already started...");
         needsToRecover = true;
 
-        int epochDuration = 2 * this.deltaInSeconds;
-        long protocolAgeInSeconds = ChronoUnit.SECONDS.between(start, LocalDateTime.now());
-        // Ignore the seconds spent on the current epoch
-        protocolAgeInSeconds -= protocolAgeInSeconds % epochDuration;
-        int ongoingEpoch = (int) (protocolAgeInSeconds / epochDuration);
-        currentEpoch.compareAndSet(0, ongoingEpoch + 1);
+        int epochDurationSeconds = 2 * this.deltaInSeconds;
+        long elapsedSeconds = ChronoUnit.SECONDS.between(protocolStartTime, LocalDateTime.now());
 
-        LocalDateTime nextEpochDate = start.plusSeconds(protocolAgeInSeconds + epochDuration);
-        long nanoSecondsToWait = ChronoUnit.NANOS.between(
-                LocalDateTime.now(), nextEpochDate
-        );
-        return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
+        long completedEpochsSeconds = elapsedSeconds - (elapsedSeconds % epochDurationSeconds);
+        int completedEpochs = (int) (completedEpochsSeconds / epochDurationSeconds);
+        currentEpoch.compareAndSet(0, completedEpochs + 1);
+
+        LocalDateTime nextEpochStartTime = protocolStartTime.plusSeconds(completedEpochsSeconds + epochDurationSeconds);
+        long delayToNextEpochNanos = ChronoUnit.NANOS.between(LocalDateTime.now(), nextEpochStartTime);
+        return Math.max(delayToNextEpochNanos, 0);
     }
 
-    private void catchUp(int fromEpoch, int toEpoch) {
-        MissingEpochs missingEpochs = new MissingEpochs(fromEpoch, toEpoch);
-        Message join = new Message(MessageType.JOIN, missingEpochs, localId);
-        urbNode.broadcastFromLocal(join);
+    private void requestMissingBlocksFromPeers(int fromEpoch, int toEpoch) {
+        MissingEpochRange missingEpochRange = new MissingEpochRange(fromEpoch, toEpoch);
+        Message joinRequest = new Message(MessageType.JOIN, missingEpochRange, localNodeId);
+        urbNode.broadcastFromLocal(joinRequest);
 
-        // Update leader randomizer to reflect the same current state as the other nodes
-        for (int epoch = 0; epoch < toEpoch; epoch++) calculateLeaderId(epoch);
+        synchronizeEpochWithPeers(toEpoch);
+    }
+
+    private void synchronizeEpochWithPeers(int targetEpoch) {
+        for (int epoch = 0; epoch < targetEpoch; epoch++) {
+            determineEpochLeader(epoch);
+        }
     }
 
     private void safeAdvanceEpoch() {
@@ -134,45 +143,50 @@ public class StreamletNode {
 
     private void advanceEpoch() {
         int epoch = currentEpoch.get();
+
         if (needsToRecover) {
-            catchUp(blockchainManager.getLastEpoch() + 1, epoch);
+            requestMissingBlocksFromPeers(blockchainManager.getLastNotarizedEpoch() + 1, epoch);
             needsToRecover = false;
         }
-        int currentLeaderId = calculateLeaderId(epoch);
-        AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + currentLeaderId + " ####");
 
-        if (localId == currentLeaderId) {
+        int epochLeader = determineEpochLeader(epoch);
+        AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + epochLeader + " ####");
+
+        if (localNodeId == epochLeader) {
             try {
-                if (!isClientGeneratingTransactions || !clientPendingTransactionsQueue.isEmpty()) {
-                    AppLogger.logDebug("Node " + localId + " is leader: proposing new block");
+                if (!isClientGeneratingTransactions || !pendingClientTransactions.isEmpty()) {
+                    AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
                     proposeNewBlock(epoch);
                 }
-                proposeNewBlock(epoch);
             } catch (NoSuchAlgorithmException e) {
                 AppLogger.logError("Error proposing new block: " + e.getMessage(), e);
             }
         }
-        if (epoch != 0 && epoch % BLOCK_CHAIN_PRINT_EPOCH_FREQUENCY == 0)
+
+        if (epoch != 0 && epoch % BLOCKCHAIN_PRINT_EPOCH_INTERVAL == 0) {
             blockchainManager.printBiggestFinalizedChain();
+        }
+
         currentEpoch.incrementAndGet();
     }
 
-    private void consumeMessages() {
+    private void processDeliveredMessages() {
         final Queue<Message> bufferedMessages = new LinkedList<>();
         try {
             while (true) {
-                Message message = derivableQueue.poll(100, TimeUnit.MILLISECONDS);
+                Message message = deliveredMessagesQueue.poll(100, TimeUnit.MILLISECONDS);
                 if (message == null) continue;
 
-                if (inConfusionEpoch(currentEpoch.get())) {
+                if (isInConfusionPhase(currentEpoch.get())) {
                     bufferedMessages.add(message);
                     continue;
                 }
 
-                while (!bufferedMessages.isEmpty())
-                    handleMessageDelivery(bufferedMessages.poll());
+                while (!bufferedMessages.isEmpty()) {
+                    processMessage(bufferedMessages.poll());
+                }
 
-                handleMessageDelivery(message);
+                processMessage(message);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -181,102 +195,117 @@ public class StreamletNode {
     }
 
     private void proposeNewBlock(int epoch) throws NoSuchAlgorithmException {
-        Block parent = blockchainManager.getBiggestNotarizedChain().getLast();
-        Transaction[] transactions;
-        if (isClientGeneratingTransactions) {
-            transactions = new Transaction[clientPendingTransactionsQueue.size()];
-            int i = 0;
-            while (!clientPendingTransactionsQueue.isEmpty()) {
-                transactions[i++] = clientPendingTransactionsQueue.poll();
-            }
-        } else {
-            transactions = transactionPoolSimulator.generateTransactions();
-        }
+        Block parentBlock = blockchainManager.getBiggestNotarizedChain().getLast();
+        Transaction[] transactions = collectBlockTransactions();
 
-        Block newBlock = new Block(parent.getSHA1(), epoch, parent.length() + 1, transactions);
+        Block newBlock = new Block(
+                parentBlock.getSHA1(),
+                epoch,
+                parentBlock.length() + 1,
+                transactions
+        );
         AppLogger.logDebug("Proposed block: " + newBlock + " with transactions: " + Arrays.toString(transactions));
-        urbNode.broadcastFromLocal(new Message(MessageType.PROPOSE, newBlock, localId));
+        urbNode.broadcastFromLocal(new Message(MessageType.PROPOSE, newBlock, localNodeId));
     }
 
-    private void handleMessageDelivery(Message message) {
-        AppLogger.logDebug("Delivering message from " + message.sender() + ": " + message.type());
-        switch (message.type()) {
-            case PROPOSE -> handlePropose(message);
-            case VOTE -> handleVote(message);
-            case JOIN -> handleJoin(message);
-            case UPDATE -> handleUpdate(message);
-            default -> {
+    private Transaction[] collectBlockTransactions() {
+        if (isClientGeneratingTransactions) {
+            Transaction[] transactions = new Transaction[pendingClientTransactions.size()];
+            int index = 0;
+            while (!pendingClientTransactions.isEmpty()) {
+                transactions[index++] = pendingClientTransactions.poll();
             }
+            return transactions;
+        } else {
+            return transactionPoolSimulator.generateTransactions();
         }
     }
 
-    private void handlePropose(Message message) {
-        Block fullBlock = (Block) message.content();
-        SeenProposal proposal = new SeenProposal(message.sender(), fullBlock.epoch());
+    private void processMessage(Message message) {
+        AppLogger.logDebug("Processing message from " + message.sender() + ": " + message.type());
+        switch (message.type()) {
+            case JOIN -> handleJoinRequest(message);
+            case PROPOSE -> handleProposalMessage(message);
+            case VOTE -> handleVoteMessage(message);
+            case UPDATE -> handleUpdateMessage(message);
+        }
+    }
 
-        if (seenProposals.contains(proposal)
-                || !blockchainManager.onPropose(fullBlock))
+    private void handleProposalMessage(Message message) {
+        Block proposedBlock = (Block) message.content();
+        SeenProposal proposal = new SeenProposal(message.sender(), proposedBlock.epoch());
+
+        if (seenProposals.contains(proposal) || !blockchainManager.onPropose(proposedBlock)) {
             return;
+        }
         seenProposals.add(proposal);
 
-        Block blockHeader = new Block(fullBlock.parentHash(), fullBlock.epoch(), fullBlock.length(), new Transaction[0]);
-        urbNode.broadcastFromLocal(new Message(MessageType.VOTE, blockHeader, localId));
-        AppLogger.logDebug("Voted for block from leader " + message.sender() + " epoch " + fullBlock.epoch());
+        Block blockHeader = new Block(
+                proposedBlock.parentHash(),
+                proposedBlock.epoch(),
+                proposedBlock.length(),
+                new Transaction[0]
+        );
+        urbNode.broadcastFromLocal(new Message(MessageType.VOTE, blockHeader, localNodeId));
+        AppLogger.logDebug("Voted for block from leader " + message.sender() + " epoch " + proposedBlock.epoch());
     }
 
-
-    private void handleVote(Message message) {
+    private void handleVoteMessage(Message message) {
         Block block = (Block) message.content();
-        votedBlocks.computeIfAbsent(block, _ -> new HashSet<>()).add(message.sender());
+        blockVotes.computeIfAbsent(block, _ -> new HashSet<>()).add(message.sender());
 
-        if (votedBlocks.get(block).size() > numberOfDistinctNodes / 2) {
+        int totalVotes = blockVotes.get(block).size();
+
+        if (totalVotes > numberOfNodes / 2) {
             blockchainManager.notarizeBlock(block);
         }
     }
 
-    private void handleJoin(Message message) {
-        if (message.sender() == localId) return;
+    private void handleJoinRequest(Message message) {
+        if (message.sender() == localNodeId) return;
 
-        MissingEpochs missingEpochs = (MissingEpochs) message.content();
-        List<BlockNode> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
+        MissingEpochRange requestedRange = (MissingEpochRange) message.content();
+        List<BlockNode> missingBlocks = blockchainManager.getBlocksInEpochRange(
+                requestedRange.from(),
+                requestedRange.to()
+        );
 
-        Message catchUp = new Message(
+        Message catchUpResponse = new Message(
                 MessageType.UPDATE,
                 new CatchUp(message.sender(), missingBlocks, currentEpoch.get()),
-                localId
+                localNodeId
         );
-        urbNode.broadcastFromLocal(catchUp);
+        urbNode.broadcastFromLocal(catchUpResponse);
     }
 
-    private void handleUpdate(Message message) {
+    private void handleUpdateMessage(Message message) {
         CatchUp catchUp = (CatchUp) message.content();
-        if (catchUp.slackerId() != localId) return;
+        if (catchUp.slackerId() != localNodeId) return;
         blockchainManager.insertMissingBlocks(catchUp.missingChain());
     }
 
-    private boolean inConfusionEpoch(int epoch) {
-        return epoch >= CONFUSION_START && epoch <= CONFUSION_START + CONFUSION_DURATION - 1;
+    private boolean isInConfusionPhase(int epoch) {
+        return epoch >= CONFUSION_EPOCH_START && epoch < CONFUSION_EPOCH_START + CONFUSION_EPOCH_DURATION;
     }
 
-    private int calculateLeaderId(int epoch) {
-        return inConfusionEpoch(epoch) ? epoch % numberOfDistinctNodes
-                : random.nextInt(numberOfDistinctNodes);
+    private int determineEpochLeader(int epoch) {
+        return isInConfusionPhase(epoch) ? epoch % numberOfNodes : epochLeaderRandomizer.nextInt(numberOfNodes);
     }
 
-    private void receiveClientTransactionsRequests() {
-        try (ServerSocket serverSocket = new ServerSocket(myClientAddress.port())) {
-            AppLogger.logInfo("Transaction client server listening on port " + myClientAddress.port());
+    private void acceptClientTransactions() {
+        try (ServerSocket serverSocket = new ServerSocket(clientServerAddress.port())) {
+            AppLogger.logInfo("Transaction server listening on port " + clientServerAddress.port());
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                executor.submit(() -> handleReceiveClientRequest(clientSocket));
+                executor.submit(() -> handleClientConnection(clientSocket));
             }
         } catch (IOException e) {
-            AppLogger.logError("Error in transaction client server: " + e.getMessage(), e);
+            AppLogger.logError("Error in transaction server: " + e.getMessage(), e);
         }
     }
 
-    private void handleReceiveClientRequest(Socket clientSocket) {
-        AppLogger.logDebug("Handling client " + clientSocket.getInetAddress() + " connection...");
+    private void handleClientConnection(Socket clientSocket) {
+        AppLogger.logDebug("Handling client connection from " + clientSocket.getInetAddress() + "...");
         try (Socket s = clientSocket;
              ObjectInputStream ois = new ObjectInputStream(s.getInputStream())) {
 
@@ -284,7 +313,7 @@ public class StreamletNode {
                 try {
                     Transaction transaction = (Transaction) ois.readObject();
                     AppLogger.logInfo("Received transaction from client " + s.getInetAddress() + ": " + transaction);
-                    clientPendingTransactionsQueue.add(transaction);
+                    pendingClientTransactions.add(transaction);
                 } catch (ClassNotFoundException e) {
                     AppLogger.logError("Received unknown object from client " + s.getInetAddress(), e);
                 }

@@ -1,8 +1,8 @@
-package app;
+package utils.application;
 
 import java.util.Arrays;
 
-record Hash(byte[] hash) {
+public record Hash(byte[] hash) {
 
     @Override
     public boolean equals(Object o) {
