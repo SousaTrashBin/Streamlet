@@ -1,6 +1,7 @@
 package utils.application;
 
-import StreamletApp.BlockNode;
+import app.BlockNode;
+
 import java.util.LinkedList;
 import java.util.List;
 

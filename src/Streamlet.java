@@ -1,4 +1,4 @@
-import StreamletApp.StreamletNode;
+import app.StreamletNode;
 import utils.ConfigParser;
 import utils.communication.PeerInfo;
 import utils.logs.AppLogger;

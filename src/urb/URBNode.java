@@ -1,6 +1,6 @@
-package URB;
+package urb;
 
-import GroupCommunication.P2PNode;
+import groupcommunication.P2PNode;
 import utils.application.Message;
 import utils.application.MessageType;
 import utils.communication.MessageWithReceiver;

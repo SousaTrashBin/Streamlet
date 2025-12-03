@@ -1,7 +1,8 @@
-package StreamletApp;
+package app;
+
+import utils.application.Block;
 
 import java.io.Serializable;
-import utils.application.Block;
 
 public class BlockNode implements Serializable {
 

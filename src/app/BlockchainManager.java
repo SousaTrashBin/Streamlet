@@ -1,4 +1,4 @@
-package StreamletApp;
+package app;
 
 import utils.application.Block;
 import utils.application.Transaction;
