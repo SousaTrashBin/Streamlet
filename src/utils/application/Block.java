@@ -78,8 +78,8 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         );
     }
 
-    public static Block fromPersistanceString(String persistanceString) {
-        Matcher matcher = BLOCK_REGEX.matcher(persistanceString);
+    public static Block fromPersistenceString(String persistenceString) {
+        Matcher matcher = BLOCK_REGEX.matcher(persistenceString);
         if (!matcher.matches()) {
             return null;
         }
@@ -90,18 +90,18 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
 
         String transactionsString = matcher.group("transactions");
         Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] : Arrays.stream(transactionsString.substring(1, transactionsString.length() - 1).split(","))
-                .map(Transaction::fromPersistanceString)
+                .map(Transaction::fromPersistenceString)
                 .toArray(Transaction[]::new);
 
         return new Block(parentHash, epoch, length, transactions);
     }
 
-    public String getPersistanceString() {
+    public String getPersistenceString() {
         return "Block[%s,%s,%s,[%s]]".formatted(
                 epoch,
                 length,
                 Base64.getEncoder().encodeToString(parentHash),
-                Arrays.stream(transactions).map(Transaction::getPersistanceString).collect(Collectors.joining(","))
+                Arrays.stream(transactions).map(Transaction::getPersistenceString).collect(Collectors.joining(","))
         );
     }
 }

@@ -5,8 +5,8 @@ import java.util.Base64;
 
 public record Hash(byte[] hash) {
 
-    public static Hash fromPersistanceString(String persistanceString) {
-        return new Hash(Base64.getDecoder().decode(persistanceString));
+    public static Hash fromPersistenceString(String persistenceString) {
+        return new Hash(Base64.getDecoder().decode(persistenceString));
     }
 
     @Override
@@ -21,7 +21,7 @@ public record Hash(byte[] hash) {
         return Arrays.hashCode(hash);
     }
 
-    public String getPersistanceString() {
+    public String getPersistenceString() {
         return Base64.getEncoder().encodeToString(hash);
     }
 }

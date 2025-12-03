@@ -31,11 +31,6 @@ public class BlockchainManager {
     //-----
     //{2}
 
-    //removePending(2)
-    //addPending(3)
-    //onPropose(3)
-    //finalizeByConsecutiveEpochBlocks()
-
     private final Map<Hash, BlockNode> blockNodesByHash = new HashMap<>(); // blocos
     private final Map<Hash, List<BlockNode>> blockchainByParentHash = new HashMap<>();
     private final Set<BlockNode> recoveredBlocks = new HashSet<>();
@@ -86,8 +81,8 @@ public class BlockchainManager {
             String blockNodeStr = line.substring(colonIndex + 1).trim();
 
             try {
-                Hash hash = Hash.fromPersistanceString(hashStr);
-                BlockNode blockNode = BlockNode.fromPersistanceString(blockNodeStr);
+                Hash hash = Hash.fromPersistenceString(hashStr);
+                BlockNode blockNode = BlockNode.fromPersistenceString(blockNodeStr);
 
                 if (blockNode != null) {
                     blockNodesByHash.put(hash, blockNode);
@@ -114,7 +109,7 @@ public class BlockchainManager {
             String childrenStr = line.substring(startBracketIndex, lastBracketIndex + 1);
 
             try {
-                Hash hash = Hash.fromPersistanceString(hashStr);
+                Hash hash = Hash.fromPersistenceString(hashStr);
 
                 List<BlockNode> children = new LinkedList<>();
                 if (childrenStr.startsWith("[") && childrenStr.endsWith("]")) {
@@ -122,7 +117,7 @@ public class BlockchainManager {
                     if (!innerContent.isBlank()) {
                         String[] blockNodeStrings = innerContent.split(",(?=BlockNode\\[)");
                         for (String blockNodeStr : blockNodeStrings) {
-                            BlockNode blockNode = BlockNode.fromPersistanceString(blockNodeStr.trim());
+                            BlockNode blockNode = BlockNode.fromPersistenceString(blockNodeStr.trim());
                             if (blockNode != null) {
                                 children.add(blockNode);
                             }
@@ -139,7 +134,7 @@ public class BlockchainManager {
         for (String line : recoveredLines) {
             if (line.isBlank()) continue;
             try {
-                BlockNode blockNode = BlockNode.fromPersistanceString(line.trim());
+                BlockNode blockNode = BlockNode.fromPersistenceString(line.trim());
                 if (blockNode != null) {
                     recoveredBlocks.add(blockNode);
                 }
@@ -152,7 +147,7 @@ public class BlockchainManager {
         for (String line : pendingLines) {
             if (line.isBlank()) continue;
             try {
-                Block block = Block.fromPersistanceString(line.trim());
+                Block block = Block.fromPersistenceString(line.trim());
                 if (block != null) {
                     pendingProposals.add(block);
                 }
@@ -164,31 +159,31 @@ public class BlockchainManager {
 
     public void persistToFile() {
         try {
-            Files.writeString(blockchainFilePath, getPersistanceString(), StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+            Files.writeString(blockchainFilePath, getPersistenceString(), StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
             Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
         } catch (Exception ignored) {
         }
     }
 
-    private String getPersistanceString() {
+    private String getPersistenceString() {
         StringBuilder sb = new StringBuilder();
         blockNodesByHash.forEach((hash, blockNode) -> {
-            sb.append("%s:%s".formatted(hash.getPersistanceString(), blockNode.getPersistanceString()));
+            sb.append("%s:%s".formatted(hash.getPersistenceString(), blockNode.getPersistenceString()));
             sb.append("\n");
         });
         sb.append("\n\n");
         blockchainByParentHash.forEach((hash, children) -> {
             sb.append("%s,[%s]".formatted(
-                            hash.getPersistanceString(),
-                            children.stream().map(BlockNode::getPersistanceString).collect(Collectors.joining(","))
+                            hash.getPersistenceString(),
+                            children.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining(","))
                     )
             );
             sb.append("\n");
         });
         sb.append("\n\n");
-        sb.append("%s".formatted(recoveredBlocks.stream().map(BlockNode::getPersistanceString).collect(Collectors.joining("\n"))));
+        sb.append("%s".formatted(recoveredBlocks.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining("\n"))));
         sb.append("\n\n");
-        sb.append("%s".formatted(pendingProposals.stream().map(Block::getPersistanceString).collect(Collectors.joining("\n"))));
+        sb.append("%s".formatted(pendingProposals.stream().map(Block::getPersistenceString).collect(Collectors.joining("\n"))));
         return sb.toString();
     }
 

@@ -11,8 +11,8 @@ public record Transaction(Long id, Double amount, Integer sender, Integer receiv
         return String.format("id=%d, %d→%d: %.2f", id, sender, receiver, amount);
     }
 
-    public static Transaction fromPersistanceString(String persistanceString) {
-        Matcher matcher = TX_REGEX.matcher(persistanceString);
+    public static Transaction fromPersistenceString(String persistenceString) {
+        Matcher matcher = TX_REGEX.matcher(persistenceString);
         if (!matcher.matches()) {
             return null;
         }
@@ -23,7 +23,7 @@ public record Transaction(Long id, Double amount, Integer sender, Integer receiv
         return new Transaction(id, amount, sender, receiver);
     }
 
-    public String getPersistanceString() {
+    public String getPersistenceString() {
         return "Tx[%d,%f,%d,%d]".formatted(id, amount, sender, receiver);
     }
 }

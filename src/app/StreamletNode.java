@@ -233,6 +233,7 @@ public class StreamletNode {
             case PROPOSE -> handleProposalMessage(message);
             case VOTE -> handleVoteMessage(message);
             case UPDATE -> handleUpdateMessage(message);
+            default -> {}
         }
     }
 
