@@ -22,7 +22,7 @@ void main(String[] args) throws IOException, InterruptedException {
 
     List<PeerInfo> remotePeers = peerInfos.stream().filter(p -> p.id() != nodeId).toList();
     AppLogger.logDebug(remotePeers.toString());
-    
+
     StreamletNode node = new StreamletNode(localPeer, remotePeers, 1, start, configData.isClientGeneratingTransactions, configData.servers.get(nodeId));
     node.startProtocol();
 }

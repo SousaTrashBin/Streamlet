@@ -14,11 +14,17 @@ public class BlockNode implements Serializable {
         this.finalized = finalized;
     }
 
-    public Block block() {return block;}
+    public Block block() {
+        return block;
+    }
 
-    public Boolean finalized() {return finalized;}
+    public Boolean finalized() {
+        return finalized;
+    }
 
-    public void finalizeBlock() {finalized = true;}
+    public void finalizeBlock() {
+        finalized = true;
+    }
 
     @Override
     public boolean equals(Object o) {

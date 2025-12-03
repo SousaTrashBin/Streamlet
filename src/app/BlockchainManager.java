@@ -49,11 +49,11 @@ public class BlockchainManager {
             result.add(hashToBlockNode.get(parentHash).block());
 
         result.addAll(
-            blockchain.get(parentHash).stream()
-                .filter(predicate::test)
-                .map(child -> findBiggestChainFromPredicate(new Hash(child.block().getSHA1()), predicate))
-                .max(Comparator.comparing(chain -> chain.size()))
-                .orElseGet(() -> new LinkedList<>())
+                blockchain.get(parentHash).stream()
+                        .filter(predicate::test)
+                        .map(child -> findBiggestChainFromPredicate(new Hash(child.block().getSHA1()), predicate))
+                        .max(Comparator.comparing(List::size))
+                        .orElseGet(LinkedList::new)
         );
         return result;
     }
@@ -127,7 +127,7 @@ public class BlockchainManager {
     private void finalizeFromConsecutivesOf(BlockNode block) {
         List<BlockNode> beforeBlockInConsecutiveEpochs = new LinkedList<>();
         List<BlockNode> afterBlockInConsecutiveEpochs = new LinkedList<>();
-        
+
         // After block in consecutive epochs
         BlockNode currBlock = block;
         int currEpoch = block.block().epoch();
@@ -138,7 +138,7 @@ public class BlockchainManager {
             Optional<BlockNode> maybeChild = children.stream()
                     .filter(blockNode -> blockNode.block().epoch() == currEpochCopy + 1)
                     .findFirst();
-            
+
             if (maybeChild.isEmpty()) break;
             BlockNode child = maybeChild.get();
 
@@ -153,8 +153,8 @@ public class BlockchainManager {
         for (int i = 1; i < FINALIZATION_MIN_SIZE; i++) {
             currBlock = hashToBlockNode.get(new Hash(currBlock.block().parentHash()));
             if (currBlock == null
-                || currBlock.block().epoch() != currEpoch - 1
-                || currBlock.equals(new BlockNode(GENESIS_BLOCK, true)))
+                    || currBlock.block().epoch() != currEpoch - 1
+                    || currBlock.equals(new BlockNode(GENESIS_BLOCK, true)))
                 break;
 
             currEpoch--;
@@ -174,9 +174,8 @@ public class BlockchainManager {
         BlockNode finalizationStarter = hashToBlockNode.get(new Hash(block.block().parentHash()));
 
         for (BlockNode currBlock = finalizationStarter;
-            !currBlock.block().equals(GENESIS_BLOCK);
-            currBlock = hashToBlockNode.get(new Hash(currBlock.block().parentHash())))
-        {
+             !currBlock.block().equals(GENESIS_BLOCK);
+             currBlock = hashToBlockNode.get(new Hash(currBlock.block().parentHash()))) {
             if (currBlock.finalized()) break;
             currBlock.finalizeBlock();
         }

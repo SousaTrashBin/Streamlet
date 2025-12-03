@@ -67,7 +67,7 @@ public class StreamletNode {
         long epochDuration = 2L * deltaInSeconds;
         long nanoSecondsToWait = waitStartOrRecover();
         scheduler.scheduleAtFixedRate(
-            this::safeAdvanceEpoch, nanoSecondsToWait, (long) (epochDuration*1e9), TimeUnit.NANOSECONDS
+                this::safeAdvanceEpoch, nanoSecondsToWait, (long) (epochDuration * 1e9), TimeUnit.NANOSECONDS
         );
     }
 
@@ -110,7 +110,7 @@ public class StreamletNode {
 
         LocalDateTime nextEpochDate = start.plusSeconds(protocolAgeInSeconds + epochDuration);
         long nanoSecondsToWait = ChronoUnit.NANOS.between(
-            LocalDateTime.now(), nextEpochDate
+                LocalDateTime.now(), nextEpochDate
         );
         return nanoSecondsToWait > 0 ? nanoSecondsToWait : 0;
     }
@@ -205,7 +205,8 @@ public class StreamletNode {
             case VOTE -> handleVote(message);
             case JOIN -> handleJoin(message);
             case UPDATE -> handleUpdate(message);
-            default -> {}
+            default -> {
+            }
         }
     }
 
@@ -240,9 +241,9 @@ public class StreamletNode {
         List<BlockNode> missingBlocks = blockchainManager.blocksFromToEpoch(missingEpochs.from(), missingEpochs.to());
 
         Message catchUp = new Message(
-            MessageType.UPDATE,
-            new CatchUp(message.sender(), missingBlocks, currentEpoch.get()),
-            localId
+                MessageType.UPDATE,
+                new CatchUp(message.sender(), missingBlocks, currentEpoch.get()),
+                localId
         );
         urbNode.broadcastFromLocal(catchUp);
     }
