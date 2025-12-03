@@ -4,10 +4,16 @@ import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
+import java.util.Base64;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public record Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) implements Content {
+    private static final Pattern BLOCK_REGEX = Pattern.compile(
+            "Block\\[(?<epoch>\\d+),(?<length>\\d+),(?<parentHash>.*),\\[(?<transactions>.*)]]"
+    );
 
     public Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) {
         this.parentHash = parentHash;
@@ -69,6 +75,33 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         return String.format(
                 "Epoch: %d | Length: %d | Parent: %s | Tx: [%s]",
                 epoch, length, partialParentHash, txSummary
+        );
+    }
+
+    public static Block fromPersistanceString(String persistanceString) {
+        Matcher matcher = BLOCK_REGEX.matcher(persistanceString);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        Integer epoch = Integer.parseInt(matcher.group("epoch"));
+        Integer length = Integer.parseInt(matcher.group("length"));
+        byte[] parentHash = Base64.getDecoder().decode(matcher.group("parentHash"));
+
+        String transactionsString = matcher.group("transactions");
+        Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] : Arrays.stream(transactionsString.substring(1, transactionsString.length() - 1).split(","))
+                .map(Transaction::fromPersistanceString)
+                .toArray(Transaction[]::new);
+
+        return new Block(parentHash, epoch, length, transactions);
+    }
+
+    public String getPersistanceString() {
+        return "Block[%s,%s,%s,[%s]]".formatted(
+                epoch,
+                length,
+                Base64.getEncoder().encodeToString(parentHash),
+                Arrays.stream(transactions).map(Transaction::getPersistanceString).collect(Collectors.joining(","))
         );
     }
 }

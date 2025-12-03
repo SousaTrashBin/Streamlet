@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.Path;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
@@ -25,6 +26,7 @@ public class StreamletNode {
     public static final int BLOCKCHAIN_PRINT_EPOCH_INTERVAL = 5;
     private static final int CONFUSION_EPOCH_START = 0;
     private static final int CONFUSION_EPOCH_DURATION = 2;
+    private static final int BLOCKCHAIN_PERSISTENCE_INTERVAL = 10;
     private final int deltaInSeconds;
     private final LocalDateTime protocolStartTime;
     private final int numberOfNodes;
@@ -55,7 +57,7 @@ public class StreamletNode {
         this.deltaInSeconds = deltaInSeconds;
         this.protocolStartTime = protocolStartTime;
         transactionPoolSimulator = new TransactionPoolSimulator(numberOfNodes);
-        blockchainManager = new BlockchainManager();
+        blockchainManager = new BlockchainManager(Path.of("output", "node_%d".formatted(localNodeId))); // output/node_1/log.txt output/node_1/blockChain.txt
         urbNode = new URBNode(localPeerInfo, remotePeersInfo, deliveredMessagesQueue::add);
         this.isClientGeneratingTransactions = isClientGeneratingTransactions;
         this.clientServerAddress = clientServerAddress;
@@ -149,6 +151,13 @@ public class StreamletNode {
             needsToRecover = false;
         }
 
+        if (epoch != 0 && epoch % BLOCKCHAIN_PRINT_EPOCH_INTERVAL == 0) {
+            blockchainManager.printBiggestFinalizedChain();
+        }
+
+        if (epoch != 0 && epoch % BLOCKCHAIN_PERSISTENCE_INTERVAL == 0) {
+            blockchainManager.persistToFile();
+        }
         int epochLeader = determineEpochLeader(epoch);
         AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + epochLeader + " ####");
 
@@ -161,10 +170,6 @@ public class StreamletNode {
             } catch (NoSuchAlgorithmException e) {
                 AppLogger.logError("Error proposing new block: " + e.getMessage(), e);
             }
-        }
-
-        if (epoch != 0 && epoch % BLOCKCHAIN_PRINT_EPOCH_INTERVAL == 0) {
-            blockchainManager.printBiggestFinalizedChain();
         }
 
         currentEpoch.incrementAndGet();

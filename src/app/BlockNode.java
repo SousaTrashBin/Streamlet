@@ -3,8 +3,13 @@ package app;
 import utils.application.Block;
 
 import java.io.Serializable;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class BlockNode implements Serializable {
+    private static final Pattern BLOCK_NODE_REGEX = Pattern.compile(
+            "BlockNode\\[(?<finalized>true|false),(?<block>.*)]"
+    );
 
     private final Block block;
     private Boolean finalized;
@@ -36,5 +41,22 @@ public class BlockNode implements Serializable {
     @Override
     public int hashCode() {
         return block.hashCode();
+    }
+
+    public static BlockNode fromPersistanceString(String persistanceString) {
+        Matcher matcher = BLOCK_NODE_REGEX.matcher(persistanceString);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        Boolean finalized = Boolean.parseBoolean(matcher.group("finalized"));
+        String blockString = matcher.group("block");
+        Block block = Block.fromPersistanceString(blockString);
+
+        return new BlockNode(block, finalized);
+    }
+
+    public String getPersistanceString() {
+        return "BlockNode[%s,%s]".formatted(finalized, block.getPersistanceString());
     }
 }
