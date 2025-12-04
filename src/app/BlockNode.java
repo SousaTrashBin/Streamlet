@@ -43,20 +43,20 @@ public class BlockNode implements Serializable {
         return block.hashCode();
     }
 
+    public String getPersistenceString() {
+        return "BlockNode[%s,%s]".formatted(finalized, block.getPersistenceString());
+    }
+
     public static BlockNode fromPersistenceString(String persistenceString) {
         Matcher matcher = BLOCK_NODE_REGEX.matcher(persistenceString);
         if (!matcher.matches()) {
             return null;
         }
 
-        Boolean finalized = Boolean.parseBoolean(matcher.group("finalized"));
+        boolean finalized = Boolean.parseBoolean(matcher.group("finalized"));
         String blockString = matcher.group("block");
         Block block = Block.fromPersistenceString(blockString);
 
         return new BlockNode(block, finalized);
-    }
-
-    public String getPersistenceString() {
-        return "BlockNode[%s,%s]".formatted(finalized, block.getPersistenceString());
     }
 }

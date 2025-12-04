@@ -57,7 +57,7 @@ public class StreamletNode {
         this.deltaInSeconds = deltaInSeconds;
         this.protocolStartTime = protocolStartTime;
         transactionPoolSimulator = new TransactionPoolSimulator(numberOfNodes);
-        blockchainManager = new BlockchainManager(Path.of("output", "node_%d".formatted(localNodeId))); // output/node_1/log.txt output/node_1/blockChain.txt
+        blockchainManager = new BlockchainManager(Path.of("output", "node_%d".formatted(localNodeId)));
         urbNode = new URBNode(localPeerInfo, remotePeersInfo, deliveredMessagesQueue::add);
         this.isClientGeneratingTransactions = isClientGeneratingTransactions;
         this.clientServerAddress = clientServerAddress;
@@ -152,11 +152,15 @@ public class StreamletNode {
         }
 
         if (epoch != 0 && epoch % BLOCKCHAIN_PRINT_EPOCH_INTERVAL == 0) {
-            blockchainManager.printBiggestFinalizedChain();
+            synchronized (blockchainManager) {
+                blockchainManager.printBiggestFinalizedChain();   
+            }
         }
 
         if (epoch != 0 && epoch % BLOCKCHAIN_PERSISTENCE_INTERVAL == 0) {
-            blockchainManager.persistToFile();
+            synchronized (blockchainManager) {
+                blockchainManager.persistToFile();   
+            }
         }
         int epochLeader = determineEpochLeader(epoch);
         AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + epochLeader + " ####");
@@ -164,8 +168,10 @@ public class StreamletNode {
         if (localNodeId == epochLeader) {
             try {
                 if (!isClientGeneratingTransactions || !pendingClientTransactions.isEmpty()) {
-                    AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
-                    proposeNewBlock(epoch);
+                    synchronized (blockchainManager) {
+                        AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
+                        proposeNewBlock(epoch);   
+                    }
                 }
             } catch (NoSuchAlgorithmException e) {
                 AppLogger.logError("Error proposing new block: " + e.getMessage(), e);
@@ -228,12 +234,14 @@ public class StreamletNode {
 
     private void processMessage(Message message) {
         AppLogger.logDebug("Processing message from " + message.sender() + ": " + message.type());
-        switch (message.type()) {
-            case JOIN -> handleJoinRequest(message);
-            case PROPOSE -> handleProposalMessage(message);
-            case VOTE -> handleVoteMessage(message);
-            case UPDATE -> handleUpdateMessage(message);
-            default -> {}
+        synchronized (blockchainManager) {
+            switch (message.type()) {
+                case JOIN -> handleJoinRequest(message);
+                case PROPOSE -> handleProposalMessage(message);
+                case VOTE -> handleVoteMessage(message);
+                case UPDATE -> handleUpdateMessage(message);
+                default -> {}
+            }   
         }
     }
 

@@ -5,11 +5,7 @@ import utils.application.Hash;
 import utils.application.Transaction;
 import utils.logs.AppLogger;
 
-import java.io.IOException;
-import java.nio.file.FileAlreadyExistsException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -23,36 +19,35 @@ public class BlockchainManager {
             new Block(new byte[SHA1_LENGTH], 0, 0, new Transaction[0]);
     private final Hash genesisParentHash;
 
-    //{1:2}
-    //-----
-    //{1:[],}
-    //-----
-    //{}
-    //-----
-    //{2}
-
-    private final Map<Hash, BlockNode> blockNodesByHash = new HashMap<>(); // blocos
+    private final Map<Hash, BlockNode> blockNodesByHash = new HashMap<>();
     private final Map<Hash, List<BlockNode>> blockchainByParentHash = new HashMap<>();
     private final Set<BlockNode> recoveredBlocks = new HashSet<>();
     private final Set<Block> pendingProposals = new HashSet<>();
 
-    private final Path logFilePath;
-    private final Path blockchainFilePath;
+    private final PersistenceFilesManager persistenceManager;
 
     private int mostRecentNotarizedEpoch = -1;
 
     public BlockchainManager(Path outputPath) {
-        this.logFilePath = outputPath.resolve(LOG_FILE_NAME);
-        this.blockchainFilePath = outputPath.resolve(BLOCK_CHAIN_FILE_NAME);
-        try {
-            createIfNotExistsOutputFiles(outputPath);
-            initializeFromFile();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+        Path logFilePath = outputPath.resolve(LOG_FILE_NAME);
+        Path blockchainFilePath = outputPath.resolve(BLOCK_CHAIN_FILE_NAME);
+        persistenceManager = new PersistenceFilesManager(logFilePath, blockchainFilePath, outputPath);
+        mostRecentNotarizedEpoch = persistenceManager.initializeFromFile(
+            blockNodesByHash, blockchainByParentHash, recoveredBlocks, pendingProposals
+        );
+
         BlockNode genesisNode = new BlockNode(GENESIS_BLOCK, true);
         genesisParentHash = new Hash(GENESIS_BLOCK.parentHash());
         Hash genesisHash = new Hash(GENESIS_BLOCK.getSHA1());
+
+        AppLogger.logWarning("RESTARTING AND THE GENESIS'S PARENT HAS THIS MANY CHILDREN...");
+        if (blockchainByParentHash.get(genesisParentHash) != null) {
+            AppLogger.logWarning("" + blockchainByParentHash.get(genesisParentHash).size());
+            AppLogger.logWarning("LENGTH BLOCK NODES BY HASH: " + blockNodesByHash.size());
+            AppLogger.logWarning("LENGTH BLOCK CHAIN BY PARENT HASH: " + blockchainByParentHash.size());
+        } else {
+            AppLogger.logWarning("GENESIS NOT INSERTED");
+        }
 
         List<BlockNode> genesisRoot = new LinkedList<>();
         genesisRoot.add(genesisNode);
@@ -62,107 +57,8 @@ public class BlockchainManager {
         blockNodesByHash.putIfAbsent(genesisHash, genesisNode);
     }
 
-
-    private void initializeFromFile() throws IOException {
-        String content = Files.readString(blockchainFilePath);
-        if (content.isBlank()) {
-            return;
-        }
-
-        String[] sections = content.split("\n\n");
-
-        String[] blockNodeLines = sections[0].trim().split("\n");
-        for (String line : blockNodeLines) {
-            if (line.isBlank()) continue;
-            int colonIndex = line.indexOf(":");
-            if (colonIndex == -1) continue;
-
-            String hashStr = line.substring(0, colonIndex).trim();
-            String blockNodeStr = line.substring(colonIndex + 1).trim();
-
-            try {
-                Hash hash = Hash.fromPersistenceString(hashStr);
-                BlockNode blockNode = BlockNode.fromPersistenceString(blockNodeStr);
-
-                if (blockNode != null) {
-                    blockNodesByHash.put(hash, blockNode);
-                }
-            } catch (IllegalArgumentException e) {
-                AppLogger.logWarning("Failed to parse blockNode entry: " + line);
-            }
-        }
-
-        String[] chainLines = sections[1].trim().split("\n");
-        for (String line : chainLines) {
-            if (line.isBlank()) continue;
-
-            int lastBracketIndex = line.lastIndexOf("]");
-            if (lastBracketIndex == -1) continue;
-
-            int startBracketIndex = line.lastIndexOf("[");
-            if (startBracketIndex == -1) continue;
-
-            String hashStr = line.substring(0, startBracketIndex).trim();
-            if (hashStr.endsWith(",")) {
-                hashStr = hashStr.substring(0, hashStr.length() - 1).trim();
-            }
-            String childrenStr = line.substring(startBracketIndex, lastBracketIndex + 1);
-
-            try {
-                Hash hash = Hash.fromPersistenceString(hashStr);
-
-                List<BlockNode> children = new LinkedList<>();
-                if (childrenStr.startsWith("[") && childrenStr.endsWith("]")) {
-                    String innerContent = childrenStr.substring(1, childrenStr.length() - 1);
-                    if (!innerContent.isBlank()) {
-                        String[] blockNodeStrings = innerContent.split(",(?=BlockNode\\[)");
-                        for (String blockNodeStr : blockNodeStrings) {
-                            BlockNode blockNode = BlockNode.fromPersistenceString(blockNodeStr.trim());
-                            if (blockNode != null) {
-                                children.add(blockNode);
-                            }
-                        }
-                    }
-                }
-                blockchainByParentHash.put(hash, children);
-            } catch (IllegalArgumentException e) {
-                AppLogger.logWarning("Failed to parse chain entry: " + line);
-            }
-        }
-
-        String[] recoveredLines = sections[2].trim().split("\n");
-        for (String line : recoveredLines) {
-            if (line.isBlank()) continue;
-            try {
-                BlockNode blockNode = BlockNode.fromPersistenceString(line.trim());
-                if (blockNode != null) {
-                    recoveredBlocks.add(blockNode);
-                }
-            } catch (Exception e) {
-                AppLogger.logWarning("Failed to parse recovered block: " + line);
-            }
-        }
-
-        String[] pendingLines = sections[3].trim().split("\n");
-        for (String line : pendingLines) {
-            if (line.isBlank()) continue;
-            try {
-                Block block = Block.fromPersistenceString(line.trim());
-                if (block != null) {
-                    pendingProposals.add(block);
-                }
-            } catch (Exception e) {
-                AppLogger.logWarning("Failed to parse pending proposal: " + line);
-            }
-        }
-    }
-
     public void persistToFile() {
-        try {
-            Files.writeString(blockchainFilePath, getPersistenceString(), StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-            Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-        } catch (Exception ignored) {
-        }
+        persistenceManager.persistToFile(getPersistenceString());
     }
 
     private String getPersistenceString() {
@@ -173,7 +69,7 @@ public class BlockchainManager {
         });
         sb.append("\n\n");
         blockchainByParentHash.forEach((hash, children) -> {
-            sb.append("%s,[%s]".formatted(
+            sb.append("%s:[%s]".formatted(
                             hash.getPersistenceString(),
                             children.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining(","))
                     )
@@ -182,24 +78,17 @@ public class BlockchainManager {
         });
         sb.append("\n\n");
         sb.append("%s".formatted(recoveredBlocks.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining("\n"))));
-        sb.append("\n\n");
+        sb.append("\n\n\n");
         sb.append("%s".formatted(pendingProposals.stream().map(Block::getPersistenceString).collect(Collectors.joining("\n"))));
         return sb.toString();
     }
 
-    private void createIfNotExistsOutputFiles(Path outputPath) throws IOException {
-        Files.createDirectories(outputPath);
-        try {
-            Files.createFile(logFilePath);
-        } catch (FileAlreadyExistsException ignored) {
-        }
-        try {
-            Files.createFile(blockchainFilePath);
-        } catch (FileAlreadyExistsException ignored) {
-        }
-    }
-
     public List<Block> getBiggestNotarizedChain() {
+        AppLogger.logWarning("STARTING THE SEARCH...");
+        AppLogger.logWarning("LENGTH BLOCK NODES BY HASH: " + blockNodesByHash.size());
+        AppLogger.logWarning("LENGTH BLOCK CHAIN BY PARENT HASH: " + blockchainByParentHash.size());
+        AppLogger.logWarning("LENGTH OF GENESIS PARENT CHILDREN: " + blockchainByParentHash.get(genesisParentHash).size());
+        AppLogger.logWarning("GENESIS PARENT HASH: " + Base64.getEncoder().encodeToString(genesisParentHash.hash()));
         return findBiggestChainMatching(genesisParentHash, _ -> true);
     }
 
@@ -210,8 +99,17 @@ public class BlockchainManager {
     private List<Block> findBiggestChainMatching(Hash parentHash, Predicate<BlockNode> predicate) {
         List<Block> chain = new LinkedList<>();
 
+        AppLogger.logWarning("FINDING BIGGEST CHAIN ON EPOCH...");
+
         if (!parentHash.equals(genesisParentHash)) {
+            AppLogger.logWarning(blockNodesByHash.get(parentHash).block().epoch().toString());
             chain.add(blockNodesByHash.get(parentHash).block());
+        }
+
+        for (BlockNode child : blockchainByParentHash.get(parentHash)) {
+            AppLogger.logWarning("\tCHILD");
+            AppLogger.logWarning("\t" + child.getPersistenceString());
+            AppLogger.logWarning("\tWITH HASH: " + Base64.getEncoder().encodeToString(child.block().getSHA1()));
         }
 
         chain.addAll(
@@ -380,6 +278,7 @@ public class BlockchainManager {
                     .add(blockNode);
             blockchainByParentHash.computeIfAbsent(blockHash, _ -> new LinkedList<>());
             blockNodesByHash.put(blockHash, blockNode);
+            finalizeAndPropagate(blockNode);
         }
     }
 

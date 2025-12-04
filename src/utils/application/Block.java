@@ -5,14 +5,16 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import utils.logs.AppLogger;
 
 public record Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) implements Content {
     private static final Pattern BLOCK_REGEX = Pattern.compile(
-            "Block\\[(?<epoch>\\d+),(?<length>\\d+),(?<parentHash>.*),\\[(?<transactions>.*)]]"
+            "Block\\{(?<epoch>\\d+),(?<length>\\d+),(?<parentHash>.*),\\&(?<transactions>.*)&}"
     );
 
     public Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) {
@@ -36,7 +38,8 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
             for (Transaction transaction : transactions) {
                 ByteBuffer transactionBuffer = ByteBuffer.allocate(24);
                 transactionBuffer.putLong(transaction.id());
-                transactionBuffer.putDouble(transaction.amount());
+                double amount = Double.parseDouble(String.format(Locale.US, "%.2f", transaction.amount()));
+                transactionBuffer.putDouble(amount);
                 transactionBuffer.putInt(transaction.sender());
                 transactionBuffer.putInt(transaction.receiver());
                 sha1.update(transactionBuffer.array());
@@ -78,30 +81,35 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         );
     }
 
+    public String getPersistenceString() {
+        AppLogger.logWarning("[BLOCK] I (" + epoch + ") have these many transactions...");
+        AppLogger.logWarning("[BLOCK] " + transactions.length);
+        return "Block{%s,%s,%s,&%s&}".formatted(
+                epoch,
+                length,
+                Base64.getEncoder().encodeToString(parentHash),
+                Arrays.stream(transactions).map(Transaction::getPersistenceString).collect(Collectors.joining(","))
+        );
+    }
+
     public static Block fromPersistenceString(String persistenceString) {
         Matcher matcher = BLOCK_REGEX.matcher(persistenceString);
         if (!matcher.matches()) {
             return null;
         }
 
-        Integer epoch = Integer.parseInt(matcher.group("epoch"));
-        Integer length = Integer.parseInt(matcher.group("length"));
+        int epoch = Integer.parseInt(matcher.group("epoch"));
+        int length = Integer.parseInt(matcher.group("length"));
         byte[] parentHash = Base64.getDecoder().decode(matcher.group("parentHash"));
 
         String transactionsString = matcher.group("transactions");
-        Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] : Arrays.stream(transactionsString.substring(1, transactionsString.length() - 1).split(","))
+        AppLogger.logWarning("[BLOCK] I (" + epoch + ") HAVE THESE TRANSACTIONS...");
+        AppLogger.logWarning("[BLOCK] " + transactionsString);
+        Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] :
+            Arrays.stream(transactionsString.split(",(?=Tx\\<)"))
                 .map(Transaction::fromPersistenceString)
                 .toArray(Transaction[]::new);
 
         return new Block(parentHash, epoch, length, transactions);
-    }
-
-    public String getPersistenceString() {
-        return "Block[%s,%s,%s,[%s]]".formatted(
-                epoch,
-                length,
-                Base64.getEncoder().encodeToString(parentHash),
-                Arrays.stream(transactions).map(Transaction::getPersistenceString).collect(Collectors.joining(","))
-        );
     }
 }
