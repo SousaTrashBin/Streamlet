@@ -35,6 +35,7 @@ public class BlockchainManager {
         mostRecentNotarizedEpoch = persistenceManager.initializeFromFile(
                 blockNodesByHash, blockchainByParentHash, recoveredBlocks, pendingProposals
         );
+        persistenceManager.getPendingOperations().forEach(this::processOperation);
 
         BlockNode genesisNode = new BlockNode(GENESIS_BLOCK, true);
         genesisParentHash = new Hash(GENESIS_BLOCK.parentHash());
@@ -55,6 +56,20 @@ public class BlockchainManager {
         blockchainByParentHash.putIfAbsent(genesisHash, new LinkedList<>());
 
         blockNodesByHash.putIfAbsent(genesisHash, genesisNode);
+    }
+
+    private void processOperation(Operation operation) {
+        switch (operation.getType()) {
+            case PROPOSE -> onPropose(operation.getBlock());
+            case NOTARIZE -> notarizeBlock(operation.getBlock());
+            case FINALIZE -> {
+                Hash hash = new Hash(operation.getBlock().getSHA1());
+                BlockNode node = blockNodesByHash.get(hash);
+                if (node != null && !node.finalized()) {
+                    finalizeChainUpstream(node);
+                }
+            }
+        }
     }
 
     public void persistToFile() {
@@ -122,7 +137,7 @@ public class BlockchainManager {
 
         chain.addAll(
                 childrenHashes.stream()
-                        .map(blockNodesByHash::get) // Convert Hash -> Node
+                        .map(blockNodesByHash::get)
                         .filter(Objects::nonNull)
                         .filter(predicate)
                         .map(child -> findBiggestChainMatching(new Hash(child.block().getSHA1()), predicate))
@@ -133,6 +148,12 @@ public class BlockchainManager {
     }
 
     public boolean onPropose(Block proposedBlock) {
+        Hash blockHash = new Hash(proposedBlock.getSHA1());
+
+        if (blockNodesByHash.containsKey(blockHash)) {
+            return false;
+        }
+
         boolean isLongerThanAnyChain = blockchainByParentHash.keySet().stream()
                 .filter(parentHash -> {
                     List<Hash> children = blockchainByParentHash.get(parentHash);
@@ -148,9 +169,11 @@ public class BlockchainManager {
 
         pendingProposals.add(proposedBlock);
 
-        Hash blockHash = new Hash(proposedBlock.getSHA1());
         BlockNode blockNode = new BlockNode(proposedBlock, false);
         blockNodesByHash.put(blockHash, blockNode);
+
+        persistenceManager.appendToLog(new Operation.Propose(proposedBlock));
+
         return true;
     }
 
@@ -174,6 +197,8 @@ public class BlockchainManager {
         }
 
         pendingProposals.remove(blockHeader);
+
+        persistenceManager.appendToLog(new Operation.Notarize(fullBlock));
 
         AppLogger.logInfo("Block notarized: epoch " + blockHeader.epoch() + " length " + blockHeader.length());
         finalizeAndPropagate(blockNode);
@@ -282,6 +307,8 @@ public class BlockchainManager {
              currentBlock = blockNodesByHash.get(new Hash(currentBlock.block().parentHash()))) {
             if (currentBlock.finalized()) break;
             currentBlock.finalizeBlock();
+
+            persistenceManager.appendToLog(new Operation.Finalize(currentBlock.block()));
         }
     }
 

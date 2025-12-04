@@ -53,7 +53,7 @@ public class PersistenceFilesManager {
 
         try {
             content = Files.readString(blockchainFilePath);
-        } catch (IOException e) {
+        } catch (IOException _) {
         }
         if (content.isBlank()) return -1;
 
@@ -194,5 +194,49 @@ public class PersistenceFilesManager {
             Files.writeString(blockchainFilePath, persistenceString, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
             Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
         } catch (IOException ignored) {}
+    }
+
+    public List<Operation> getPendingOperations() {
+        List<Operation> operations = new LinkedList<>();
+        List<String> lines;
+
+        try {
+            lines = Files.readAllLines(logFilePath);
+        } catch (IOException e) {
+            return operations;
+        }
+
+        for (String line : lines) {
+            if (line.isBlank()) continue;
+
+            int splitIndex = line.indexOf(":");
+            if (splitIndex == -1) continue;
+
+            String type = line.substring(0, splitIndex);
+            String blockData = line.substring(splitIndex + 1);
+
+            try {
+                Block block = Block.fromPersistenceString(blockData);
+                if (block == null) continue;
+
+                switch (type) {
+                    case "PROPOSE" -> operations.add(new Operation.Propose(block));
+                    case "NOTARIZE" -> operations.add(new Operation.Notarize(block));
+                    case "FINALIZE" -> operations.add(new Operation.Finalize(block));
+                }
+            } catch (Exception e) {
+                AppLogger.logWarning("Corrupt log entry skipped: " + line);
+            }
+        }
+        return operations;
+    }
+
+    public void appendToLog(Operation operation) {
+        String logEntry = operation.getPersistenceString() + "\n";
+        try {
+            Files.writeString(logFilePath, logEntry, StandardOpenOption.APPEND, StandardOpenOption.CREATE);
+        } catch (IOException e) {
+            AppLogger.logWarning("Failed to append operation to log: " + e.getMessage());
+        }
     }
 }
