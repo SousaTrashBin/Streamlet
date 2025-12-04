@@ -20,20 +20,20 @@ public class BlockchainManager {
     private final Hash genesisParentHash;
 
     private final Map<Hash, BlockNode> blockNodesByHash = new HashMap<>();
-    private final Map<Hash, List<BlockNode>> blockchainByParentHash = new HashMap<>();
+    private final Map<Hash, List<Hash>> blockchainByParentHash = new HashMap<>();
     private final Set<BlockNode> recoveredBlocks = new HashSet<>();
     private final Set<Block> pendingProposals = new HashSet<>();
 
     private final PersistenceFilesManager persistenceManager;
 
-    private int mostRecentNotarizedEpoch = -1;
+    private int mostRecentNotarizedEpoch;
 
     public BlockchainManager(Path outputPath) {
         Path logFilePath = outputPath.resolve(LOG_FILE_NAME);
         Path blockchainFilePath = outputPath.resolve(BLOCK_CHAIN_FILE_NAME);
         persistenceManager = new PersistenceFilesManager(logFilePath, blockchainFilePath, outputPath);
         mostRecentNotarizedEpoch = persistenceManager.initializeFromFile(
-            blockNodesByHash, blockchainByParentHash, recoveredBlocks, pendingProposals
+                blockNodesByHash, blockchainByParentHash, recoveredBlocks, pendingProposals
         );
 
         BlockNode genesisNode = new BlockNode(GENESIS_BLOCK, true);
@@ -49,8 +49,8 @@ public class BlockchainManager {
             AppLogger.logWarning("GENESIS NOT INSERTED");
         }
 
-        List<BlockNode> genesisRoot = new LinkedList<>();
-        genesisRoot.add(genesisNode);
+        List<Hash> genesisRoot = new LinkedList<>();
+        genesisRoot.add(genesisHash);
         blockchainByParentHash.putIfAbsent(genesisParentHash, genesisRoot);
         blockchainByParentHash.putIfAbsent(genesisHash, new LinkedList<>());
 
@@ -63,32 +63,31 @@ public class BlockchainManager {
 
     private String getPersistenceString() {
         StringBuilder sb = new StringBuilder();
+
         blockNodesByHash.forEach((hash, blockNode) -> {
             sb.append("%s:%s".formatted(hash.getPersistenceString(), blockNode.getPersistenceString()));
             sb.append("\n");
         });
         sb.append("\n\n");
-        blockchainByParentHash.forEach((hash, children) -> {
-            sb.append("%s:[%s]".formatted(
-                            hash.getPersistenceString(),
-                            children.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining(","))
-                    )
-            );
+
+        blockchainByParentHash.forEach((hash, childHashes) -> {
+            String childrenStr = childHashes.stream()
+                    .map(Hash::getPersistenceString)
+                    .collect(Collectors.joining(","));
+
+            sb.append("%s:[%s]".formatted(hash.getPersistenceString(), childrenStr));
             sb.append("\n");
         });
+
         sb.append("\n\n");
         sb.append("%s".formatted(recoveredBlocks.stream().map(BlockNode::getPersistenceString).collect(Collectors.joining("\n"))));
-        sb.append("\n\n\n");
+        sb.append("\n\n");
         sb.append("%s".formatted(pendingProposals.stream().map(Block::getPersistenceString).collect(Collectors.joining("\n"))));
         return sb.toString();
     }
 
     public List<Block> getBiggestNotarizedChain() {
         AppLogger.logWarning("STARTING THE SEARCH...");
-        AppLogger.logWarning("LENGTH BLOCK NODES BY HASH: " + blockNodesByHash.size());
-        AppLogger.logWarning("LENGTH BLOCK CHAIN BY PARENT HASH: " + blockchainByParentHash.size());
-        AppLogger.logWarning("LENGTH OF GENESIS PARENT CHILDREN: " + blockchainByParentHash.get(genesisParentHash).size());
-        AppLogger.logWarning("GENESIS PARENT HASH: " + Base64.getEncoder().encodeToString(genesisParentHash.hash()));
         return findBiggestChainMatching(genesisParentHash, _ -> true);
     }
 
@@ -102,18 +101,29 @@ public class BlockchainManager {
         AppLogger.logWarning("FINDING BIGGEST CHAIN ON EPOCH...");
 
         if (!parentHash.equals(genesisParentHash)) {
-            AppLogger.logWarning(blockNodesByHash.get(parentHash).block().epoch().toString());
-            chain.add(blockNodesByHash.get(parentHash).block());
+            BlockNode node = blockNodesByHash.get(parentHash);
+            if (node != null) {
+                AppLogger.logWarning(node.block().epoch().toString());
+                chain.add(node.block());
+            }
         }
 
-        for (BlockNode child : blockchainByParentHash.get(parentHash)) {
-            AppLogger.logWarning("\tCHILD");
-            AppLogger.logWarning("\t" + child.getPersistenceString());
-            AppLogger.logWarning("\tWITH HASH: " + Base64.getEncoder().encodeToString(child.block().getSHA1()));
+        List<Hash> childrenHashes = blockchainByParentHash.get(parentHash);
+        if (childrenHashes == null) childrenHashes = new ArrayList<>();
+
+        for (Hash childHash : childrenHashes) {
+            BlockNode child = blockNodesByHash.get(childHash);
+            if (child != null) {
+                AppLogger.logWarning("\tCHILD");
+                AppLogger.logWarning("\t" + child.getPersistenceString());
+                AppLogger.logWarning("\tWITH HASH: " + Base64.getEncoder().encodeToString(child.block().getSHA1()));
+            }
         }
 
         chain.addAll(
-                blockchainByParentHash.get(parentHash).stream()
+                childrenHashes.stream()
+                        .map(blockNodesByHash::get) // Convert Hash -> Node
+                        .filter(Objects::nonNull)
                         .filter(predicate)
                         .map(child -> findBiggestChainMatching(new Hash(child.block().getSHA1()), predicate))
                         .max(Comparator.comparing(List::size))
@@ -124,7 +134,10 @@ public class BlockchainManager {
 
     public boolean onPropose(Block proposedBlock) {
         boolean isLongerThanAnyChain = blockchainByParentHash.keySet().stream()
-                .filter(parentHash -> blockchainByParentHash.get(parentHash).isEmpty())
+                .filter(parentHash -> {
+                    List<Hash> children = blockchainByParentHash.get(parentHash);
+                    return children == null || children.isEmpty();
+                })
                 .map(blockNodesByHash::get)
                 .filter(Objects::nonNull)
                 .anyMatch(blockNode -> proposedBlock.length() > blockNode.block().length());
@@ -153,7 +166,7 @@ public class BlockchainManager {
         BlockNode blockNode = blockNodesByHash.get(blockHash);
 
         blockchainByParentHash.computeIfAbsent(parentHash, _ -> new LinkedList<>())
-                .add(blockNode);
+                .add(blockHash);
         blockchainByParentHash.computeIfAbsent(blockHash, _ -> new LinkedList<>());
 
         if (blockHeader.epoch() > mostRecentNotarizedEpoch) {
@@ -172,7 +185,13 @@ public class BlockchainManager {
     }
 
     private void propagateFinalizedStatusDownstream(Hash parentHash) {
-        for (BlockNode child : blockchainByParentHash.get(parentHash)) {
+        List<Hash> childrenHashes = blockchainByParentHash.get(parentHash);
+        if (childrenHashes == null || childrenHashes.isEmpty()) return;
+
+        for (Hash childHash : childrenHashes) {
+            BlockNode child = blockNodesByHash.get(childHash);
+            if (child == null) continue;
+
             if (child.finalized()) {
                 finalizeChainUpstream(child);
             }
@@ -189,7 +208,22 @@ public class BlockchainManager {
         finalizationCandidate.addAll(blocksAfter);
 
         if (finalizationCandidate.size() >= FINALIZATION_MIN_SIZE) {
-            finalizeChainUpstream(finalizationCandidate.getLast());
+            BlockNode lastBlock = finalizationCandidate.getLast();
+            finalizeChainUpstream(lastBlock);
+            verifyAndFinalizeBasedOnChildren(lastBlock);
+        }
+    }
+
+    private void verifyAndFinalizeBasedOnChildren(BlockNode lastBlock) {
+        List<Hash> childrenHashes = blockchainByParentHash.get(new Hash(lastBlock.block().getSHA1()));
+
+        if (childrenHashes != null && !childrenHashes.isEmpty()) {
+            for (Hash childHash : childrenHashes) {
+                BlockNode child = blockNodesByHash.get(childHash);
+                if (child != null && !child.finalized()) {
+                    finalizeByConsecutiveEpochBlocks(child);
+                }
+            }
         }
     }
 
@@ -199,10 +233,13 @@ public class BlockchainManager {
         int currentEpoch = startBlock.block().epoch();
 
         for (int i = 1; i < FINALIZATION_MIN_SIZE; i++) {
-            List<BlockNode> children = blockchainByParentHash.get(new Hash(currentBlock.block().getSHA1()));
+            List<Hash> childHashes = blockchainByParentHash.get(new Hash(currentBlock.block().getSHA1()));
+            if (childHashes == null) break;
 
             int targetEpoch = currentEpoch + 1;
-            Optional<BlockNode> nextBlock = children.stream()
+            Optional<BlockNode> nextBlock = childHashes.stream()
+                    .map(blockNodesByHash::get)
+                    .filter(Objects::nonNull)
                     .filter(blockNode -> blockNode.block().epoch() == targetEpoch)
                     .findFirst();
 
@@ -240,9 +277,7 @@ public class BlockchainManager {
     }
 
     private void finalizeChainUpstream(BlockNode anchorBlock) {
-        BlockNode parentBlock = blockNodesByHash.get(new Hash(anchorBlock.block().parentHash()));
-
-        for (BlockNode currentBlock = parentBlock;
+        for (BlockNode currentBlock = anchorBlock;
              currentBlock != null && !isGenesis(currentBlock);
              currentBlock = blockNodesByHash.get(new Hash(currentBlock.block().parentHash()))) {
             if (currentBlock.finalized()) break;
@@ -259,8 +294,7 @@ public class BlockchainManager {
     }
 
     public List<BlockNode> getBlocksInEpochRange(int fromEpoch, int toEpoch) {
-        return blockchainByParentHash.values().stream()
-                .flatMap(List::stream)
+        return blockNodesByHash.values().stream()
                 .sorted(Comparator.comparing(block -> block.block().epoch()))
                 .dropWhile(block -> block.block().epoch() < fromEpoch)
                 .takeWhile(block -> block.block().epoch() < toEpoch)
@@ -268,18 +302,31 @@ public class BlockchainManager {
     }
 
     public void insertMissingBlocks(List<BlockNode> missingBlocks) {
-        for (BlockNode blockNode : missingBlocks) {
-            if (!recoveredBlocks.add(blockNode)) continue;
+        Set<Hash> affectedBlocks = new HashSet<>();
 
+        for (BlockNode blockNode : missingBlocks) {
             Hash parentHash = new Hash(blockNode.block().parentHash());
             Hash blockHash = new Hash(blockNode.block().getSHA1());
 
-            blockchainByParentHash.computeIfAbsent(parentHash, _ -> new LinkedList<>())
-                    .add(blockNode);
-            blockchainByParentHash.computeIfAbsent(blockHash, _ -> new LinkedList<>());
+            recoveredBlocks.add(blockNode);
             blockNodesByHash.put(blockHash, blockNode);
-            finalizeAndPropagate(blockNode);
+
+            List<Hash> siblings = blockchainByParentHash.computeIfAbsent(parentHash, _ -> new LinkedList<>());
+
+            if (!siblings.contains(blockHash)) {
+                siblings.add(blockHash);
+            }
+
+            blockchainByParentHash.computeIfAbsent(blockHash, _ -> new LinkedList<>());
+
+            affectedBlocks.add(parentHash);
+            affectedBlocks.add(blockHash);
         }
+
+        affectedBlocks.stream()
+                .map(blockNodesByHash::get)
+                .filter(Objects::nonNull)
+                .forEach(this::finalizeAndPropagate);
     }
 
     public void printBiggestFinalizedChain() {
