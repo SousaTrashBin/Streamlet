@@ -28,7 +28,6 @@ public class StreamletNode {
     private final int localId;
     private final int deltaInSeconds;
     private final int numberOfDistinctNodes;
-    private final boolean isTransactionClientMode;
 
     private final URBNode urbNode;
     private final Random random = new Random(1L);
@@ -45,12 +44,11 @@ public class StreamletNode {
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final Address myClientAddress;
 
-    public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds, boolean isTransactionClientMode, Address myClientAddress)
+    public StreamletNode(PeerInfo localPeerInfo, List<PeerInfo> remotePeersInfo, int deltaInSeconds, Address myClientAddress)
             throws IOException {
         localId = localPeerInfo.id();
         numberOfDistinctNodes = 1 + remotePeersInfo.size();
         this.deltaInSeconds = deltaInSeconds;
-        this.isTransactionClientMode = isTransactionClientMode;
         transactionPoolSimulator = new TransactionPoolSimulator(numberOfDistinctNodes);
         blockchainManager = new BlockchainManager();
         urbNode = new URBNode(localPeerInfo, remotePeersInfo, derivableQueue::add);
@@ -80,16 +78,14 @@ public class StreamletNode {
 
         if (localId == currentLeaderId) {
             try {
-                if (!isTransactionClientMode || !clientPendingTransactionsQueue.isEmpty()) {
-                    AppLogger.logDebug("Node " + localId + " is leader: proposing new block");
-                    proposeNewBlock(epoch);
-                }
+                AppLogger.logDebug("Node " + localId + " is leader: proposing new block");
+                proposeNewBlock(epoch);
             } catch (NoSuchAlgorithmException e) {
                 AppLogger.logError("Error proposing new block: " + e.getMessage(), e);
             }
         }
 
-        if (epoch % 5 == 0 || isTransactionClientMode) blockchainManager.printBlockchainTree();
+        if (epoch % 5 == 0) blockchainManager.printBlockchainTree();
     }
 
     private void launchThreads() {
@@ -102,7 +98,7 @@ public class StreamletNode {
             }
         });
         executor.submit(this::consumeMessages);
-        if (isTransactionClientMode) executor.submit(this::receiveClientTransactionsRequests);
+        executor.submit(this::receiveClientTransactionsRequests);
     }
 
     private void consumeMessages() {
@@ -135,7 +131,7 @@ public class StreamletNode {
         Block parent = parentOpt.get();
         Transaction[] transactions;
 
-        if (isTransactionClientMode) {
+        if (!clientPendingTransactionsQueue.isEmpty()) {
             transactions = new Transaction[clientPendingTransactionsQueue.size()];
             int i = 0;
             while (!clientPendingTransactionsQueue.isEmpty()) {

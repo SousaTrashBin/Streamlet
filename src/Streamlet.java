@@ -22,6 +22,6 @@ void main(String[] args) throws IOException, InterruptedException {
     AppLogger.logDebug(remotePeers.toString());
 
     AppLogger.logInfo("Waiting all peers to connect...");
-    StreamletNode node = new StreamletNode(localPeer, remotePeers, 1, configData.isClientGeneratingTransactions, configData.servers.get(nodeId));
+    StreamletNode node = new StreamletNode(localPeer, remotePeers, 1, configData.servers.get(nodeId));
     node.startProtocol();
 }
