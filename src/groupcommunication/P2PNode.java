@@ -1,4 +1,4 @@
-package GroupCommunication;
+package groupcommunication;
 
 import utils.application.Message;
 import utils.communication.KeyType;
@@ -14,14 +14,16 @@ import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.*;
-import java.util.concurrent.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 public class P2PNode implements Runnable, AutoCloseable {
     private static final long RETRY_DELAY_MS = 2500;
     private final PeerInfo localPeerInfo;
-    private final CountDownLatch allPeersConnectedLatch;
     private final Map<Integer, PeerInfo> peerInfoById;
     private final ConcurrentLinkedQueue<MessageWithReceiver> outgoingMessageQueue = new ConcurrentLinkedQueue<>();
     private final BlockingQueue<Message> incomingMessageQueue = new LinkedBlockingQueue<>();
@@ -35,7 +37,6 @@ public class P2PNode implements Runnable, AutoCloseable {
         this.localPeerInfo = localPeerInfo;
         this.peerInfoById = remotePeersInfo.stream()
                 .collect(Collectors.toMap(PeerInfo::id, Function.identity()));
-        this.allPeersConnectedLatch = new CountDownLatch(peerInfoById.size());
         initializeServerSocket();
     }
 
@@ -201,7 +202,6 @@ public class P2PNode implements Runnable, AutoCloseable {
         clientChannel.write(idBuffer);
 
         if (connectedPeers.add(remotePeer.id())) {
-            allPeersConnectedLatch.countDown();
             peerConnectionBackoff.remove(remotePeer.id());
         }
 
@@ -241,7 +241,6 @@ public class P2PNode implements Runnable, AutoCloseable {
         peerConnections.put(remotePeerId, incomingChannel);
 
         if (connectedPeers.add(remotePeerId)) {
-            allPeersConnectedLatch.countDown();
             peerConnectionBackoff.remove(remotePeerId);
         }
 
@@ -295,10 +294,6 @@ public class P2PNode implements Runnable, AutoCloseable {
 
     public void enqueueIncomingMessage(Message message) {
         incomingMessageQueue.add(message);
-    }
-
-    public void waitForAllPeersConnected() throws InterruptedException {
-        allPeersConnectedLatch.await();
     }
 
     private void processOutgoingMessages() {

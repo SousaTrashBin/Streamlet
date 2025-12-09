@@ -20,10 +20,10 @@ void main() throws IOException {
     }));
 
     ConfigParser.ConfigData configData = ConfigParser.parseConfig();
-    AppLogger.updateLoggerLevel(configData.logLevel);
+    AppLogger.updateLoggerLevel(configData.logLevel());
 
     userInput = new BufferedReader(new InputStreamReader(System.in));
-    serverAddressees = ConfigParser.parseConfig().servers;
+    serverAddressees = ConfigParser.parseConfig().servers();
     printInfoGui();
 
     while (running) {

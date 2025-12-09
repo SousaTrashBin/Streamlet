@@ -15,3 +15,4 @@ compile: $(OUT_DIR)
 
 clean:
 	rm -rf out
+	rm -rf output

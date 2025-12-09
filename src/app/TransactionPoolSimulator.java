@@ -1,4 +1,4 @@
-package StreamletApp;
+package app;
 
 import utils.application.Transaction;
 

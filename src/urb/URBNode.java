@@ -1,6 +1,6 @@
-package URB;
+package urb;
 
-import GroupCommunication.P2PNode;
+import groupcommunication.P2PNode;
 import utils.application.Message;
 import utils.application.MessageType;
 import utils.communication.MessageWithReceiver;
@@ -33,12 +33,7 @@ public class URBNode {
         this.callback = callback;
     }
 
-    public void waitForAllPeersToConnect() throws InterruptedException {
-        networkLayer.waitForAllPeersConnected();
-    }
-
     public void startURBNode() throws InterruptedException {
-        waitForAllPeersToConnect();
         AppLogger.logInfo("P2PNode " + localPeerId + " is ready");
         executor.submit(this::processIncomingMessages);
     }
@@ -72,7 +67,7 @@ public class URBNode {
                     broadcastFromLocal(contentMessage);
                 }
             }
-            case PROPOSE, VOTE -> {
+            case PROPOSE, VOTE, JOIN, UPDATE -> {
                 Message echoMessage = new Message(MessageType.ECHO, message, localPeerId);
                 broadcastToPeers(echoMessage);
                 deliverToApplication(message);
