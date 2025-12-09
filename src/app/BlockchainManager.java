@@ -28,14 +28,20 @@ public class BlockchainManager {
 
     private int mostRecentNotarizedEpoch;
 
+    private boolean isRestoring = false;
+
     public BlockchainManager(Path outputPath) {
         Path logFilePath = outputPath.resolve(LOG_FILE_NAME);
         Path blockchainFilePath = outputPath.resolve(BLOCK_CHAIN_FILE_NAME);
         persistenceManager = new PersistenceFilesManager(logFilePath, blockchainFilePath, outputPath);
+
         mostRecentNotarizedEpoch = persistenceManager.initializeFromFile(
                 blockNodesByHash, blockchainByParentHash, recoveredBlocks, pendingProposals
         );
+
+        isRestoring = true;
         persistenceManager.getPendingOperations().forEach(this::processOperation);
+        isRestoring = false;
 
         BlockNode genesisNode = new BlockNode(GENESIS_BLOCK, true);
         genesisParentHash = new Hash(GENESIS_BLOCK.parentHash());
@@ -162,7 +168,9 @@ public class BlockchainManager {
         BlockNode blockNode = new BlockNode(proposedBlock, false);
         blockNodesByHash.put(blockHash, blockNode);
 
-        persistenceManager.appendToLog(new Operation.Propose(proposedBlock));
+        if (!isRestoring) {
+            persistenceManager.appendToLog(new Operation.Propose(proposedBlock));
+        }
 
         return true;
     }
@@ -188,7 +196,9 @@ public class BlockchainManager {
 
         pendingProposals.remove(blockHeader);
 
-        persistenceManager.appendToLog(new Operation.Notarize(fullBlock));
+        if (!isRestoring) {
+            persistenceManager.appendToLog(new Operation.Notarize(fullBlock));
+        }
 
         AppLogger.logInfo("Block notarized: epoch " + blockHeader.epoch() + " length " + blockHeader.length());
         finalizeAndPropagate(blockNode);
@@ -298,7 +308,9 @@ public class BlockchainManager {
             if (currentBlock.finalized()) break;
             currentBlock.finalizeBlock();
 
-            persistenceManager.appendToLog(new Operation.Finalize(currentBlock.block()));
+            if (!isRestoring) {
+                persistenceManager.appendToLog(new Operation.Finalize(currentBlock.block()));
+            }
         }
     }
 
@@ -344,6 +356,8 @@ public class BlockchainManager {
                 .map(blockNodesByHash::get)
                 .filter(Objects::nonNull)
                 .forEach(this::finalizeAndPropagate);
+
+        persistToFile();
     }
 
     public void printBiggestFinalizedChain() {
