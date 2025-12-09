@@ -1,5 +1,10 @@
 package utils;
 
+import utils.communication.Address;
+import utils.communication.PeerInfo;
+import utils.logs.AppLogger;
+import utils.logs.LogLevel;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -12,10 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import utils.communication.Address;
-import utils.communication.PeerInfo;
-import utils.logs.AppLogger;
-import utils.logs.LogLevel;
 
 public class ConfigParser {
     public static final String CONFIG_FILE = "config.txt";

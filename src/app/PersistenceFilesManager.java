@@ -1,5 +1,9 @@
 package app;
 
+import utils.application.Block;
+import utils.application.Hash;
+import utils.logs.AppLogger;
+
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -9,9 +13,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import utils.application.Block;
-import utils.application.Hash;
-import utils.logs.AppLogger;
 
 public class PersistenceFilesManager {
 
@@ -189,7 +190,8 @@ public class PersistenceFilesManager {
         try {
             Files.writeString(blockchainFilePath, persistenceString, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
             Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-        } catch (IOException ignored) {}
+        } catch (IOException ignored) {
+        }
     }
 
     public List<Operation> getPendingOperations() {

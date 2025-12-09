@@ -1,4 +1,3 @@
-
 package app;
 
 import urb.URBNode;
@@ -12,7 +11,6 @@ import java.io.ObjectInputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.file.Path;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -149,13 +147,13 @@ public class StreamletNode {
 
         if (epoch != 0 && epoch % BLOCKCHAIN_PRINT_EPOCH_INTERVAL == 0) {
             synchronized (blockchainManager) {
-                blockchainManager.printBiggestFinalizedChain();   
+                blockchainManager.printBiggestFinalizedChain();
             }
         }
 
         if (epoch != 0 && epoch % BLOCKCHAIN_PERSISTENCE_INTERVAL == 0) {
             synchronized (blockchainManager) {
-                blockchainManager.persistToFile();   
+                blockchainManager.persistToFile();
             }
         }
         int epochLeader = determineEpochLeader(epoch);
@@ -164,7 +162,7 @@ public class StreamletNode {
         if (localNodeId == epochLeader) {
             synchronized (blockchainManager) {
                 AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
-                proposeNewBlock(epoch);   
+                proposeNewBlock(epoch);
             }
         }
 
@@ -230,8 +228,9 @@ public class StreamletNode {
                 case PROPOSE -> handleProposalMessage(message);
                 case VOTE -> handleVoteMessage(message);
                 case UPDATE -> handleUpdateMessage(message);
-                default -> {}
-            }   
+                default -> {
+                }
+            }
         }
     }
 

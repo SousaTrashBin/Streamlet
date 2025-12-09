@@ -19,6 +19,19 @@ public class BlockNode implements Serializable {
         this.finalized = finalized;
     }
 
+    public static BlockNode fromPersistenceString(String persistenceString) {
+        Matcher matcher = BLOCK_NODE_REGEX.matcher(persistenceString);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        boolean finalized = Boolean.parseBoolean(matcher.group("finalized"));
+        String blockString = matcher.group("block");
+        Block block = Block.fromPersistenceString(blockString);
+
+        return new BlockNode(block, finalized);
+    }
+
     public Block block() {
         return block;
     }
@@ -45,18 +58,5 @@ public class BlockNode implements Serializable {
 
     public String getPersistenceString() {
         return "BlockNode[%s,%s]".formatted(finalized, block.getPersistenceString());
-    }
-
-    public static BlockNode fromPersistenceString(String persistenceString) {
-        Matcher matcher = BLOCK_NODE_REGEX.matcher(persistenceString);
-        if (!matcher.matches()) {
-            return null;
-        }
-
-        boolean finalized = Boolean.parseBoolean(matcher.group("finalized"));
-        String blockString = matcher.group("block");
-        Block block = Block.fromPersistenceString(blockString);
-
-        return new BlockNode(block, finalized);
     }
 }

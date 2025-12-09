@@ -23,6 +23,25 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         this.transactions = transactions.clone();
     }
 
+    public static Block fromPersistenceString(String persistenceString) {
+        Matcher matcher = BLOCK_REGEX.matcher(persistenceString);
+        if (!matcher.matches()) {
+            return null;
+        }
+
+        int epoch = Integer.parseInt(matcher.group("epoch"));
+        int length = Integer.parseInt(matcher.group("length"));
+        byte[] parentHash = Base64.getDecoder().decode(matcher.group("parentHash"));
+
+        String transactionsString = matcher.group("transactions");
+        Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] :
+                Arrays.stream(transactionsString.split(",(?=Tx\\<)"))
+                        .map(Transaction::fromPersistenceString)
+                        .toArray(Transaction[]::new);
+
+        return new Block(parentHash, epoch, length, transactions);
+    }
+
     public byte[] getSHA1() {
         try {
             MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
@@ -87,24 +106,5 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
                 Base64.getEncoder().encodeToString(parentHash),
                 Arrays.stream(transactions).map(Transaction::getPersistenceString).collect(Collectors.joining(","))
         );
-    }
-
-    public static Block fromPersistenceString(String persistenceString) {
-        Matcher matcher = BLOCK_REGEX.matcher(persistenceString);
-        if (!matcher.matches()) {
-            return null;
-        }
-
-        int epoch = Integer.parseInt(matcher.group("epoch"));
-        int length = Integer.parseInt(matcher.group("length"));
-        byte[] parentHash = Base64.getDecoder().decode(matcher.group("parentHash"));
-
-        String transactionsString = matcher.group("transactions");
-        Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] :
-            Arrays.stream(transactionsString.split(",(?=Tx\\<)"))
-                .map(Transaction::fromPersistenceString)
-                .toArray(Transaction[]::new);
-
-        return new Block(parentHash, epoch, length, transactions);
     }
 }
