@@ -5,16 +5,8 @@ P2P=127.0.0.1:54582
 P2P=127.0.0.1:54583
 P2P=127.0.0.1:54584
 
+# Agreed time for every server to start protocol dd-MM-yyyy HH:mm:ss
+start=09-12-2025 16:18:00
+
 # NORMAL and DEBUG mode for logs
-logLevel=NORMAL
-
-# SIMULATION: transactions are generated randomly by the servers
-# CLIENT: waits for client to send transactions
-transactionsMode=SIMULATION
-
-# In case of CLIENT mode, server addresses
-server=127.0.0.1:54680
-server=127.0.0.1:54681
-server=127.0.0.1:54682
-server=127.0.0.1:54683
-server=127.0.0.1:54684
+logLevel=DEBUG

@@ -19,8 +19,11 @@ void main() throws IOException {
         closeResources();
     }));
 
+    ConfigParser.ConfigData configData = ConfigParser.parseConfig();
+    AppLogger.updateLoggerLevel(configData.logLevel());
+
     userInput = new BufferedReader(new InputStreamReader(System.in));
-    serverAddressees = ConfigParser.parseConfig().servers;
+    serverAddressees = ConfigParser.parseConfig().servers();
     printInfoGui();
 
     while (running) {
@@ -28,7 +31,10 @@ void main() throws IOException {
             try {
                 connectToRandomStreamlet();
             } catch (IOException e) {
-                AppLogger.logError("Failed to connect to a server. Retrying in 2s...", e);
+                AppLogger.logWarning("Failed to connect to a server.");
+                AppLogger.logWarning("Check if Streamlet nodes are running and if config transactionsMode=CLIENT");
+                AppLogger.logWarning("Retrying in 2s...");
+                AppLogger.logDebug(String.valueOf(e));
                 sleepMillis(2000);
                 continue;
             }
