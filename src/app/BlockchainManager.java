@@ -1,13 +1,14 @@
 package app;
 
-import java.nio.file.Path;
-import java.util.*;
-import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import utils.application.Block;
 import utils.application.Hash;
 import utils.application.Transaction;
 import utils.logs.AppLogger;
+
+import java.nio.file.Path;
+import java.util.*;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 public class BlockchainManager {
     public static final int FINALIZATION_MIN_SIZE = 3;
@@ -46,6 +47,18 @@ public class BlockchainManager {
         blockchainByParentHash.putIfAbsent(genesisHash, new LinkedList<>());
 
         blockNodesByHash.putIfAbsent(genesisHash, genesisNode);
+
+        restoreFinalizationStateFromTips();
+    }
+
+    private void restoreFinalizationStateFromTips() {
+        blockNodesByHash.values().stream()
+                .filter(node -> {
+                    Hash hash = new Hash(node.block().getSHA1());
+                    List<Hash> children = blockchainByParentHash.get(hash);
+                    return children == null || children.isEmpty();
+                })
+                .forEach(this::finalizeAndPropagate);
     }
 
     private void processOperation(Operation operation) {
