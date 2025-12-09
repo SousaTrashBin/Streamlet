@@ -162,13 +162,9 @@ public class StreamletNode {
         AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + epochLeader + " ####");
 
         if (localNodeId == epochLeader) {
-            try {
-                synchronized (blockchainManager) {
-                    AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
-                    proposeNewBlock(epoch);   
-                }
-            } catch (NoSuchAlgorithmException e) {
-                AppLogger.logError("Error proposing new block: " + e.getMessage(), e);
+            synchronized (blockchainManager) {
+                AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
+                proposeNewBlock(epoch);   
             }
         }
 
@@ -193,13 +189,13 @@ public class StreamletNode {
 
                 processMessage(message);
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             AppLogger.logWarning("Message consumer thread interrupted");
         }
     }
 
-    private void proposeNewBlock(int epoch) throws NoSuchAlgorithmException {
+    private void proposeNewBlock(int epoch) {
         Block parentBlock = blockchainManager.getBiggestNotarizedChain().getLast();
         Transaction[] transactions = collectBlockTransactions();
 

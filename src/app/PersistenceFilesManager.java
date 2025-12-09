@@ -1,9 +1,5 @@
 package app;
 
-import utils.application.Block;
-import utils.application.Hash;
-import utils.logs.AppLogger;
-
 import java.io.IOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -13,6 +9,9 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import utils.application.Block;
+import utils.application.Hash;
+import utils.logs.AppLogger;
 
 public class PersistenceFilesManager {
 
@@ -95,8 +94,6 @@ public class PersistenceFilesManager {
             String hashStr = line.substring(0, colonIndex).trim();
             String blockNodeStr = line.substring(colonIndex + 1).trim();
 
-            AppLogger.logWarning("[PERSISTENCE] BLOCKNODE OF HASH " + hashStr);
-
             try {
                 Hash hash = Hash.fromPersistenceString(hashStr);
                 BlockNode blockNode = BlockNode.fromPersistenceString(blockNodeStr);
@@ -108,7 +105,7 @@ public class PersistenceFilesManager {
                         maxEpoch = blockNode.block().epoch();
                     }
                 }
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException _) {
                 AppLogger.logWarning("Failed to parse blockNode entry: " + line);
             }
         }
@@ -143,15 +140,14 @@ public class PersistenceFilesManager {
                         try {
                             Hash childHash = Hash.fromPersistenceString(childHashStr.trim());
                             childrenHashes.add(childHash);
-                            AppLogger.logWarning("[PERSISTENCE] FOUND CHILD HASH FOR PARENT " + hashStr);
-                        } catch (Exception e) {
+                        } catch (Exception _) {
                             AppLogger.logWarning("Could not parse child hash: " + childHashStr);
                         }
                     }
                 }
 
                 blockchainByParentHash.put(parentHash, childrenHashes);
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException _) {
                 AppLogger.logWarning("Failed to parse chain entry: " + line);
             }
         }
@@ -167,7 +163,7 @@ public class PersistenceFilesManager {
                 if (blockNode != null) {
                     recoveredBlocks.add(blockNode);
                 }
-            } catch (Exception e) {
+            } catch (Exception _) {
                 AppLogger.logWarning("Failed to parse recovered block: " + line);
             }
         }
@@ -183,7 +179,7 @@ public class PersistenceFilesManager {
                 if (block != null) {
                     pendingProposals.add(block);
                 }
-            } catch (Exception e) {
+            } catch (Exception _) {
                 AppLogger.logWarning("Failed to parse pending proposal: " + line);
             }
         }
@@ -224,7 +220,7 @@ public class PersistenceFilesManager {
                     case "NOTARIZE" -> operations.add(new Operation.Notarize(block));
                     case "FINALIZE" -> operations.add(new Operation.Finalize(block));
                 }
-            } catch (Exception e) {
+            } catch (Exception _) {
                 AppLogger.logWarning("Corrupt log entry skipped: " + line);
             }
         }

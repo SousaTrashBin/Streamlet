@@ -64,7 +64,7 @@ public class ConfigParser {
     private static LocalDateTime parseToDate(String dateStr) {
         try {
             return LocalDateTime.parse(dateStr, START_FORMAT);
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             AppLogger.logWarning(
                     "Invalid format for protocol start date. Default start date was used. Should be: dd-MM-yyyy HH:mm:ss."
             );

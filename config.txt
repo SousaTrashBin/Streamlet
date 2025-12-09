@@ -9,4 +9,11 @@ P2P=127.0.0.1:54584
 start=09-12-2025 16:18:00
 
 # NORMAL and DEBUG mode for logs
-logLevel=DEBUG
+logLevel=NORMAL
+
+# In case of CLIENT mode, server addresses
+server=127.0.0.1:54680
+server=127.0.0.1:54681
+server=127.0.0.1:54682
+server=127.0.0.1:54683
+server=127.0.0.1:54684

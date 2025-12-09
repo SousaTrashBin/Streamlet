@@ -10,7 +10,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import utils.logs.AppLogger;
 
 public record Block(byte[] parentHash, Integer epoch, Integer length, Transaction[] transactions) implements Content {
     private static final Pattern BLOCK_REGEX = Pattern.compile(
@@ -82,8 +81,6 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
     }
 
     public String getPersistenceString() {
-        AppLogger.logWarning("[BLOCK] I (" + epoch + ") have these many transactions...");
-        AppLogger.logWarning("[BLOCK] " + transactions.length);
         return "Block{%s,%s,%s,&%s&}".formatted(
                 epoch,
                 length,
@@ -103,8 +100,6 @@ public record Block(byte[] parentHash, Integer epoch, Integer length, Transactio
         byte[] parentHash = Base64.getDecoder().decode(matcher.group("parentHash"));
 
         String transactionsString = matcher.group("transactions");
-        AppLogger.logWarning("[BLOCK] I (" + epoch + ") HAVE THESE TRANSACTIONS...");
-        AppLogger.logWarning("[BLOCK] " + transactionsString);
         Transaction[] transactions = transactionsString.isEmpty() ? new Transaction[0] :
             Arrays.stream(transactionsString.split(",(?=Tx\\<)"))
                 .map(Transaction::fromPersistenceString)

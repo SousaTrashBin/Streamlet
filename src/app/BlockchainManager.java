@@ -1,14 +1,13 @@
 package app;
 
-import utils.application.Block;
-import utils.application.Hash;
-import utils.application.Transaction;
-import utils.logs.AppLogger;
-
 import java.nio.file.Path;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import utils.application.Block;
+import utils.application.Hash;
+import utils.application.Transaction;
+import utils.logs.AppLogger;
 
 public class BlockchainManager {
     public static final int FINALIZATION_MIN_SIZE = 3;
@@ -40,15 +39,6 @@ public class BlockchainManager {
         BlockNode genesisNode = new BlockNode(GENESIS_BLOCK, true);
         genesisParentHash = new Hash(GENESIS_BLOCK.parentHash());
         Hash genesisHash = new Hash(GENESIS_BLOCK.getSHA1());
-
-        AppLogger.logWarning("RESTARTING AND THE GENESIS'S PARENT HAS THIS MANY CHILDREN...");
-        if (blockchainByParentHash.get(genesisParentHash) != null) {
-            AppLogger.logWarning("" + blockchainByParentHash.get(genesisParentHash).size());
-            AppLogger.logWarning("LENGTH BLOCK NODES BY HASH: " + blockNodesByHash.size());
-            AppLogger.logWarning("LENGTH BLOCK CHAIN BY PARENT HASH: " + blockchainByParentHash.size());
-        } else {
-            AppLogger.logWarning("GENESIS NOT INSERTED");
-        }
 
         List<Hash> genesisRoot = new LinkedList<>();
         genesisRoot.add(genesisHash);
@@ -102,7 +92,6 @@ public class BlockchainManager {
     }
 
     public List<Block> getBiggestNotarizedChain() {
-        AppLogger.logWarning("STARTING THE SEARCH...");
         return findBiggestChainMatching(genesisParentHash, _ -> true);
     }
 
@@ -113,27 +102,15 @@ public class BlockchainManager {
     private List<Block> findBiggestChainMatching(Hash parentHash, Predicate<BlockNode> predicate) {
         List<Block> chain = new LinkedList<>();
 
-        AppLogger.logWarning("FINDING BIGGEST CHAIN ON EPOCH...");
-
         if (!parentHash.equals(genesisParentHash)) {
             BlockNode node = blockNodesByHash.get(parentHash);
             if (node != null) {
-                AppLogger.logWarning(node.block().epoch().toString());
                 chain.add(node.block());
             }
         }
 
         List<Hash> childrenHashes = blockchainByParentHash.get(parentHash);
         if (childrenHashes == null) childrenHashes = new ArrayList<>();
-
-        for (Hash childHash : childrenHashes) {
-            BlockNode child = blockNodesByHash.get(childHash);
-            if (child != null) {
-                AppLogger.logWarning("\tCHILD");
-                AppLogger.logWarning("\t" + child.getPersistenceString());
-                AppLogger.logWarning("\tWITH HASH: " + Base64.getEncoder().encodeToString(child.block().getSHA1()));
-            }
-        }
 
         chain.addAll(
                 childrenHashes.stream()
