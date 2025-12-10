@@ -204,8 +204,7 @@ public class BlockchainManager {
         if (!isRestoring) {
             persistenceManager.appendToLog(new Operation.Notarize(fullBlock));
         }
-
-        AppLogger.logInfo("Block notarized: epoch " + blockHeader.epoch() + " length " + blockHeader.length());
+        AppLogger.logInfo("Notarized block %d (length = %d)".formatted(blockHeader.epoch(), blockHeader.length()));
         finalizeAndPropagate(blockNode);
     }
 

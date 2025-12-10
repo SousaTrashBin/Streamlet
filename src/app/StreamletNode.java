@@ -150,11 +150,10 @@ public class StreamletNode {
             }
         }
         int epochLeader = determineEpochLeader(epoch);
-        AppLogger.logInfo("#### EPOCH = " + epoch + " LEADER = " + epochLeader + " ####");
+        AppLogger.logInfo(String.format("---- Epoch %d | Leader: %d ----", epoch, epochLeader));
 
         if (localNodeId == epochLeader) {
             synchronized (blockchainManager) {
-                AppLogger.logDebug("Node " + localNodeId + " is leader: proposing new block");
                 proposeNewBlock(epoch);
             }
         }
@@ -196,7 +195,7 @@ public class StreamletNode {
                 parentBlock.length() + 1,
                 transactions
         );
-        AppLogger.logDebug("Proposed block: " + newBlock + " with transactions: " + Arrays.toString(transactions));
+        AppLogger.logDebug("Leader proposing block for epoch " + epoch);
         urbNode.broadcastFromLocal(new Message(MessageType.PROPOSE, newBlock, localNodeId));
     }
 
@@ -214,7 +213,6 @@ public class StreamletNode {
     }
 
     private void processMessage(Message message) {
-        AppLogger.logDebug("Processing message from " + message.sender() + ": " + message.type());
         synchronized (blockchainManager) {
             switch (message.type()) {
                 case JOIN -> handleJoinRequest(message);
@@ -239,7 +237,7 @@ public class StreamletNode {
         Hash parentHash = new Hash(proposedBlock.parentHash());
 
         if (!blockchainManager.containsBlock(parentHash)) {
-            AppLogger.logInfo("Received orphan block " + proposedBlock.epoch());
+            AppLogger.logInfo("Received orphan block " + proposedBlock.epoch() + " from " + message.sender());
 
             orphanProposals.computeIfAbsent(parentHash, _ -> new ArrayList<>()).add(proposedBlock);
 
@@ -265,16 +263,15 @@ public class StreamletNode {
                 new Transaction[0]
         );
         urbNode.broadcastFromLocal(new Message(MessageType.VOTE, blockHeader, localNodeId));
-        AppLogger.logDebug("Voted for block from leader " + senderId + " epoch " + proposedBlock.epoch());
+        AppLogger.logDebug("Voted for block " + proposedBlock.epoch() + " from leader " + senderId);
     }
 
     private void handleVoteMessage(Message message) {
         Block block = (Block) message.content();
 
-        Hash blockHash = new Hash(block.getSHA1());
-        if (!blockchainManager.containsBlock(blockHash) && !blockchainManager.isBlockPending(block)) {
-            AppLogger.logInfo("Received orphan block VOTE " + block.epoch());
-
+        Hash parentHash = new Hash(block.parentHash());
+        if (!blockchainManager.containsBlock(parentHash) && !blockchainManager.isBlockPending(block)) {
+            AppLogger.logInfo("Received vote for orphan block " + block.epoch());
 
             int myLastEpoch = blockchainManager.getLastNotarizedEpoch();
             if (block.epoch() > myLastEpoch) {
@@ -285,6 +282,7 @@ public class StreamletNode {
         blockVotes.computeIfAbsent(block, _ -> new HashSet<>()).add(message.sender());
 
         int totalVotes = blockVotes.get(block).size();
+        AppLogger.logInfo("Received vote for block " + block.epoch() + " (" + totalVotes + "/" + numberOfNodes + " votes)");
 
         if (totalVotes > numberOfNodes / 2) {
             blockchainManager.notarizeBlock(block);
@@ -314,6 +312,12 @@ public class StreamletNode {
 
         blockchainManager.insertMissingBlocks(catchUp.missingChain());
 
+        if (!catchUp.missingChain().isEmpty()) {
+            AppLogger.logInfo(String.format("Synced %d blocks (Epochs %d-%d)",
+                    catchUp.missingChain().size(),
+                    catchUp.missingChain().getFirst().block().epoch(),
+                    catchUp.missingChain().getLast().block().epoch()));
+        }
 
         for (BlockNode node : catchUp.missingChain()) {
             Hash insertedHash = new Hash(node.block().getSHA1());
@@ -322,6 +326,7 @@ public class StreamletNode {
                 List<Block> waitingBlocks = orphanProposals.remove(insertedHash);
 
                 if (waitingBlocks != null) {
+                    AppLogger.logDebug("Resolving " + waitingBlocks.size() + " orphans for parent " + insertedHash);
                     for (Block orphan : waitingBlocks) {
                         int originalLeader = determineEpochLeader(orphan.epoch());
                         processProposal(orphan, originalLeader);
@@ -362,7 +367,7 @@ public class StreamletNode {
             while (true) {
                 try {
                     Transaction transaction = (Transaction) ois.readObject();
-                    AppLogger.logInfo("Received transaction from client " + s.getInetAddress() + ": " + transaction);
+                    AppLogger.logInfo("Received transaction from " + s.getInetAddress() + ": " + transaction);
                     pendingClientTransactions.add(transaction);
                 } catch (ClassNotFoundException e) {
                     AppLogger.logError("Received unknown object from client " + s.getInetAddress(), e);
