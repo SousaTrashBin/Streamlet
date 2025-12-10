@@ -395,10 +395,6 @@ public class BlockchainManager {
         }
     }
 
-    public boolean containsBlock(Hash blockHash) {
-        return blockNodesByHash.containsKey(blockHash);
-    }
-
     public boolean isBlockPending(Block block) {
         return pendingProposals.contains(block);
     }
