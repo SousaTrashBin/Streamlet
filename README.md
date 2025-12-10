@@ -64,15 +64,25 @@ To execute the client process run:
 java -cp out StreamletClient
 ```
 ## Features
-All the expected features were implemented plus two of the non-required features:
-1. The blockchain is persisted in disk through two files for each node in the output folder -> 
-one file that contains a representation of the data structures that are used in the main memory 
-which is updated from x to x epochs (currently set to 10) and another file which logs the operations 
-that were done on the blockchain while the main file has not yet been overwritten. This allows 
-the system to tolerate a full crash.
-2. There is client software (by running the StreamletClient class as especified above) that allows 
-the client to send transactions to a random currently running server which will create blocks 
-with those transactions instead of creating dummies.
+
+All required features were implemented along with several additional enhancements:
+
+1. **Persistence**: The blockchain maintains disk-based persistence for each node in the output folder using a dual-file
+   approach. The primary file contains a snapshot of the in-memory data structures, updated every N epochs (currently
+   10). A secondary log file records all operations between snapshots. This design ensures full crash recovery
+   capability.
+
+2. **Client Software**: A dedicated client application (StreamletClient class) enables external clients to submit
+   transactions to any active server node. The node incorporates these transactions into blocks, replacing the default
+   dummy transaction mechanism.
+
+3. **Synchronization and Recovery**: A catch-up mechanism allows nodes to recover from crashes or network partitions.
+   Nodes automatically detect gaps in their blockchain, identify missing epoch ranges, and request the corresponding
+   blocks from peers using `JOIN` and `UPDATE` messages.
+
+4. **Orphan Block Management**: The system includes robust handling of out-of-order block delivery. Blocks received
+   before their parent blocks are buffered temporarily and automatically processed once the missing parent arrives,
+   ensuring chain consistency despite network delays.
 
 ## Limitations
 We found no limitations with our current implementation of this project.
