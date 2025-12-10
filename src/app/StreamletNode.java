@@ -30,7 +30,6 @@ public class StreamletNode {
     private final int numberOfNodes;
     private final TransactionPoolSimulator transactionPoolSimulator;
     private final AtomicInteger currentEpoch = new AtomicInteger(0);
-    private final Random epochLeaderRandomizer = new Random(1L);
 
     private final int localNodeId;
     private final URBNode urbNode;
@@ -40,7 +39,7 @@ public class StreamletNode {
     private final Set<SeenProposal> seenProposals = new HashSet<>();
     private final ConcurrentLinkedQueue<Transaction> pendingClientTransactions = new ConcurrentLinkedQueue<>();
 
-    private final Map<Hash, List<Message>> pendingOrphans = new HashMap<>();
+    private final Map<Hash, List<Block>> orphanProposals = new HashMap<>();
 
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService epochScheduler = Executors.newSingleThreadScheduledExecutor();
@@ -121,14 +120,6 @@ public class StreamletNode {
         MissingEpochRange missingEpochRange = new MissingEpochRange(fromEpoch, toEpoch);
         Message joinRequest = new Message(MessageType.JOIN, missingEpochRange, localNodeId);
         urbNode.broadcastFromLocal(joinRequest);
-
-        synchronizeEpochWithPeers(toEpoch);
-    }
-
-    private void synchronizeEpochWithPeers(int targetEpoch) {
-        for (int epoch = 0; epoch < targetEpoch; epoch++) {
-            determineEpochLeader(epoch);
-        }
     }
 
     private void safeAdvanceEpoch() {
@@ -238,27 +229,34 @@ public class StreamletNode {
 
     private void handleProposalMessage(Message message) {
         Block proposedBlock = (Block) message.content();
-        Hash parentHash = new Hash(proposedBlock.parentHash());
-
-        if (!blockchainManager.containsBlock(parentHash)) {
-            AppLogger.logInfo("Received orphan block " + proposedBlock.epoch() + ". Requesting missing blocks...");
-
-            pendingOrphans.computeIfAbsent(parentHash, _ -> new ArrayList<>()).add(message);
-
-            int lastNotarized = blockchainManager.getLastNotarizedEpoch();
-            MissingEpochRange missingEpochRange = new MissingEpochRange(lastNotarized, proposedBlock.epoch());
-
-            Message joinRequest = new Message(MessageType.JOIN, missingEpochRange, localNodeId);
-            urbNode.broadcastFromLocal(joinRequest);
-            return;
-        }
-
         SeenProposal proposal = new SeenProposal(message.sender(), proposedBlock.epoch());
 
-        if (seenProposals.contains(proposal) || !blockchainManager.onPropose(proposedBlock)) {
+        if (seenProposals.contains(proposal)) {
             return;
         }
         seenProposals.add(proposal);
+
+        Hash parentHash = new Hash(proposedBlock.parentHash());
+
+        if (!blockchainManager.containsBlock(parentHash)) {
+            AppLogger.logInfo("Received orphan block " + proposedBlock.epoch());
+
+            orphanProposals.computeIfAbsent(parentHash, _ -> new ArrayList<>()).add(proposedBlock);
+
+            int myLastEpoch = blockchainManager.getLastNotarizedEpoch();
+            if (proposedBlock.epoch() > myLastEpoch) {
+                requestMissingBlocksFromPeers(myLastEpoch + 1, proposedBlock.epoch());
+            }
+            return;
+        }
+
+        processProposal(proposedBlock, message.sender());
+    }
+
+    private void processProposal(Block proposedBlock, int senderId) {
+        if (!blockchainManager.onPropose(proposedBlock)) {
+            return;
+        }
 
         Block blockHeader = new Block(
                 proposedBlock.parentHash(),
@@ -267,11 +265,23 @@ public class StreamletNode {
                 new Transaction[0]
         );
         urbNode.broadcastFromLocal(new Message(MessageType.VOTE, blockHeader, localNodeId));
-        AppLogger.logDebug("Voted for block from leader " + message.sender() + " epoch " + proposedBlock.epoch());
+        AppLogger.logDebug("Voted for block from leader " + senderId + " epoch " + proposedBlock.epoch());
     }
 
     private void handleVoteMessage(Message message) {
         Block block = (Block) message.content();
+
+        Hash blockHash = new Hash(block.getSHA1());
+        if (!blockchainManager.containsBlock(blockHash) && !blockchainManager.isBlockPending(block)) {
+            AppLogger.logInfo("Received orphan block VOTE " + block.epoch());
+
+
+            int myLastEpoch = blockchainManager.getLastNotarizedEpoch();
+            if (block.epoch() > myLastEpoch) {
+                requestMissingBlocksFromPeers(myLastEpoch + 1, block.epoch());
+            }
+        }
+
         blockVotes.computeIfAbsent(block, _ -> new HashSet<>()).add(message.sender());
 
         int totalVotes = blockVotes.get(block).size();
@@ -304,12 +314,18 @@ public class StreamletNode {
 
         blockchainManager.insertMissingBlocks(catchUp.missingChain());
 
+
         for (BlockNode node : catchUp.missingChain()) {
-            Hash blockHash = new Hash(node.block().getSHA1());
-            if (pendingOrphans.containsKey(blockHash)) {
-                List<Message> orphans = pendingOrphans.remove(blockHash);
-                for (Message orphanMsg : orphans) {
-                    handleProposalMessage(orphanMsg);
+            Hash insertedHash = new Hash(node.block().getSHA1());
+
+            if (orphanProposals.containsKey(insertedHash)) {
+                List<Block> waitingBlocks = orphanProposals.remove(insertedHash);
+
+                if (waitingBlocks != null) {
+                    for (Block orphan : waitingBlocks) {
+                        int originalLeader = determineEpochLeader(orphan.epoch());
+                        processProposal(orphan, originalLeader);
+                    }
                 }
             }
         }
@@ -320,7 +336,10 @@ public class StreamletNode {
     }
 
     private int determineEpochLeader(int epoch) {
-        return isInConfusionPhase(epoch) ? epoch % numberOfNodes : epochLeaderRandomizer.nextInt(numberOfNodes);
+        if (isInConfusionPhase(epoch)) {
+            return epoch % numberOfNodes;
+        }
+        return new Random(epoch).nextInt(numberOfNodes);
     }
 
     private void acceptClientTransactions() {

@@ -115,35 +115,36 @@ public class BlockchainManager {
     }
 
     public List<Block> getBiggestNotarizedChain() {
-        return findBiggestChainMatching(genesisParentHash, _ -> true);
+        return getChainEndingAtBestTip(_ -> true);
     }
 
     public List<Block> getBiggestFinalizedChain() {
-        return findBiggestChainMatching(genesisParentHash, BlockNode::finalized);
+        return getChainEndingAtBestTip(BlockNode::finalized);
     }
 
-    private List<Block> findBiggestChainMatching(Hash parentHash, Predicate<BlockNode> predicate) {
-        List<Block> chain = new LinkedList<>();
+    private List<Block> getChainEndingAtBestTip(Predicate<BlockNode> predicate) {
+        BlockNode bestTip = blockNodesByHash.values().stream()
+                .filter(predicate)
+                .max(Comparator.comparingInt((BlockNode n) -> n.block().length())
+                        .thenComparing(n -> new Hash(n.block().getSHA1()).toString()))
+                .orElse(null);
 
-        if (!parentHash.equals(genesisParentHash)) {
-            BlockNode node = blockNodesByHash.get(parentHash);
-            if (node != null) {
-                chain.add(node.block());
-            }
+        if (bestTip == null) {
+            return new ArrayList<>();
         }
 
-        List<Hash> childrenHashes = blockchainByParentHash.get(parentHash);
-        if (childrenHashes == null) childrenHashes = new ArrayList<>();
+        LinkedList<Block> chain = new LinkedList<>();
+        BlockNode current = bestTip;
 
-        chain.addAll(
-                childrenHashes.stream()
-                        .map(blockNodesByHash::get)
-                        .filter(Objects::nonNull)
-                        .filter(predicate)
-                        .map(child -> findBiggestChainMatching(new Hash(child.block().getSHA1()), predicate))
-                        .max(Comparator.comparing(List::size))
-                        .orElseGet(LinkedList::new)
-        );
+        while (current != null) {
+            chain.addFirst(current.block());
+
+            if (isGenesis(current)) break;
+
+            Hash parentHash = new Hash(current.block().parentHash());
+            current = blockNodesByHash.get(parentHash);
+        }
+
         return chain;
     }
 
@@ -392,5 +393,13 @@ public class BlockchainManager {
                 AppLogger.logInfo(line);
             }
         }
+    }
+
+    public boolean containsBlock(Hash blockHash) {
+        return blockNodesByHash.containsKey(blockHash);
+    }
+
+    public boolean isBlockPending(Block block) {
+        return pendingProposals.contains(block);
     }
 }
