@@ -151,6 +151,19 @@ public class BlockchainManager {
             return false;
         }
 
+        boolean isLongerThanAnyChain = blockchainByParentHash.keySet().stream()
+                .filter(parentHash -> {
+                    List<Hash> children = blockchainByParentHash.get(parentHash);
+                    return children == null || children.isEmpty();
+                })
+                .map(blockNodesByHash::get)
+                .filter(Objects::nonNull)
+                .anyMatch(blockNode -> proposedBlock.length() > blockNode.block().length());
+
+        if (!isLongerThanAnyChain) {
+            return false;
+        }
+
         pendingProposals.add(proposedBlock);
 
         BlockNode blockNode = new BlockNode(proposedBlock, false);
