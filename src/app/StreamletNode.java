@@ -40,6 +40,8 @@ public class StreamletNode {
     private final Set<SeenProposal> seenProposals = new HashSet<>();
     private final ConcurrentLinkedQueue<Transaction> pendingClientTransactions = new ConcurrentLinkedQueue<>();
 
+    private final Map<Hash, List<Message>> pendingOrphans = new HashMap<>();
+
     private final ExecutorService executor = Executors.newCachedThreadPool();
     private final ScheduledExecutorService epochScheduler = Executors.newSingleThreadScheduledExecutor();
     private final Address clientServerAddress;
@@ -236,6 +238,21 @@ public class StreamletNode {
 
     private void handleProposalMessage(Message message) {
         Block proposedBlock = (Block) message.content();
+        Hash parentHash = new Hash(proposedBlock.parentHash());
+
+        if (!blockchainManager.containsBlock(parentHash)) {
+            AppLogger.logInfo("Received orphan block " + proposedBlock.epoch() + ". Requesting missing blocks...");
+
+            pendingOrphans.computeIfAbsent(parentHash, _ -> new ArrayList<>()).add(message);
+
+            int lastNotarized = blockchainManager.getLastNotarizedEpoch();
+            MissingEpochRange missingEpochRange = new MissingEpochRange(lastNotarized, proposedBlock.epoch());
+
+            Message joinRequest = new Message(MessageType.JOIN, missingEpochRange, localNodeId);
+            urbNode.broadcastFromLocal(joinRequest);
+            return;
+        }
+
         SeenProposal proposal = new SeenProposal(message.sender(), proposedBlock.epoch());
 
         if (seenProposals.contains(proposal) || !blockchainManager.onPropose(proposedBlock)) {
@@ -284,7 +301,18 @@ public class StreamletNode {
     private void handleUpdateMessage(Message message) {
         CatchUp catchUp = (CatchUp) message.content();
         if (catchUp.slackerId() != localNodeId) return;
+
         blockchainManager.insertMissingBlocks(catchUp.missingChain());
+
+        for (BlockNode node : catchUp.missingChain()) {
+            Hash blockHash = new Hash(node.block().getSHA1());
+            if (pendingOrphans.containsKey(blockHash)) {
+                List<Message> orphans = pendingOrphans.remove(blockHash);
+                for (Message orphanMsg : orphans) {
+                    handleProposalMessage(orphanMsg);
+                }
+            }
+        }
     }
 
     private boolean isInConfusionPhase(int epoch) {

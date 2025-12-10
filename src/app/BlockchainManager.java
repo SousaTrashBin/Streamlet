@@ -67,6 +67,10 @@ public class BlockchainManager {
                 .forEach(this::finalizeAndPropagate);
     }
 
+    public boolean containsBlock(Hash blockHash) {
+        return blockNodesByHash.containsKey(blockHash);
+    }
+
     private void processOperation(Operation operation) {
         switch (operation.getType()) {
             case PROPOSE -> onPropose(operation.getBlock());

@@ -188,8 +188,8 @@ public class PersistenceFilesManager {
 
     public void persistToFile(String persistenceString) {
         try {
-            Files.writeString(blockchainFilePath, persistenceString, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
-            Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE);
+            Files.writeString(blockchainFilePath, persistenceString, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE, StandardOpenOption.SYNC);
+            Files.writeString(logFilePath, "", StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.CREATE, StandardOpenOption.SYNC);
         } catch (IOException ignored) {
         }
     }
@@ -232,7 +232,7 @@ public class PersistenceFilesManager {
     public void appendToLog(Operation operation) {
         String logEntry = operation.getPersistenceString() + "\n";
         try {
-            Files.writeString(logFilePath, logEntry, StandardOpenOption.APPEND, StandardOpenOption.CREATE);
+            Files.writeString(logFilePath, logEntry, StandardOpenOption.APPEND, StandardOpenOption.CREATE, StandardOpenOption.SYNC);
         } catch (IOException e) {
             AppLogger.logWarning("Failed to append operation to log: " + e.getMessage());
         }
